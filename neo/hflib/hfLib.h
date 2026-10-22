@@ -331,6 +331,9 @@ public:
 #include "ui/hfBitmapFont.h"
 #include "ui/hfCanvasComponent.h"
 #include "ui/hfUiSystem.h"
+#include "ui/hfUiEvents.h"
+#include "ui/hfUiWidget.h"
+#include "ui/hfUiInput.h"
 
 // Phase 10 — networking (ENet-class transport, replication, lag compensation)
 #include "net/hfNetComponent.h"
