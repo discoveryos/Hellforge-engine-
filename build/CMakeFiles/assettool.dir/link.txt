@@ -1,0 +1,1 @@
+/usr/bin/c++ -O3 -DNDEBUG -O2 -fno-omit-frame-pointer -ffast-math -Wl,--dependency-file=CMakeFiles/assettool.dir/link.d CMakeFiles/assettool.dir/tools/hfAssetTool.cpp.o CMakeFiles/assettool.dir/tools/hfAssetTool_platform.cpp.o -o assettool  libhfassetlib.a

@@ -1,0 +1,50 @@
+# demo.hfs - hfscript example
+# hfscript is a Python/Ruby-flavored, indentation structured scripting
+# language.  Locally-defined functions, loops and a handful of engine
+# builtins.  String literals beginning with #str_ are localized at
+# compile time; loc("key") resolves one at run time.
+
+game = "Hellforge"
+
+def greet(name):
+    print(format("Hello, {} from {}!", name, game))
+    return len(name)
+
+def addmul(a, b):
+    return a * b
+
+def main():
+    print("=== hfscript demo ===")
+    total = 0
+    for i in range(5):
+        total = total + i
+    print(format("sum 0..4 = {}", total))
+
+    n = greet("world")
+    print(format("the name has {} letters", n))
+
+    x = 3.5
+    if x > 4:
+        print("big")
+    elif x > 3:
+        print("medium")
+    else:
+        print("small")
+
+    y = 1
+    while y < 4:
+        print(format("while {}", y))
+        y += 1
+
+    print(format("3 * 4 = {}", addmul(3, 4)))
+    print(format("t-shirts from 15/2: {}", int(15 / 2)))
+    print(format("sqrt(2) = {}", sqrt(2.0)))
+
+    # localization: runtime lookup (passes through when no dictionary loaded)
+    print(loc("str_welcome"))
+
+    # engine cvars
+    setcvar("test_scriptvar", "abc")
+    print(getcvar("test_scriptvar"))
+
+main()

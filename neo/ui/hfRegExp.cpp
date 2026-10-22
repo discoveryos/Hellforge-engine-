@@ -1,0 +1,375 @@
+#pragma hdrstop
+#include "../hflib/hfprecompiled.h"
+
+#include "hfRegExp.h"
+#include "hfDeviceContext.h"
+#include "hfWindow.h"
+#include "hfUserInterfaceLocal.h"
+
+int hfRegister::REGCOUNT[NUMTYPES] = {4, 1, 1, 1, 0, 2, 3, 4};
+
+/*
+====================
+hfRegister::SetToRegs
+====================
+*/
+void hfRegister::SetToRegs( float *registers ) {
+	int i;
+	hfVec4 v;
+	hfVec2 v2;
+	hfVec3 v3;
+	hfRectangle rect;
+
+	if ( !enabled || var == NULL || ( var && ( var->GetDict() || !var->GetEval() ) ) ) {
+		return;
+	}
+
+	switch( type ) {
+		case VEC4: {
+			v = *static_cast<hfWinVec4*>(var);
+			break;
+		}
+		case RECTANGLE: {
+			rect = *static_cast<hfWinRectangle*>(var);
+			v = rect.ToVec4();
+			break;
+		}
+		case VEC2: {
+			v2 = *static_cast<hfWinVec2*>(var);
+			v[0] = v2[0];
+			v[1] = v2[1];
+			break;
+		}
+		case VEC3: {
+			v3 = *static_cast<hfWinVec3*>(var);
+			v[0] = v3[0];
+			v[1] = v3[1];
+			v[2] = v3[2];
+			break;
+		}
+		case FLOAT: {
+			v[0] = *static_cast<hfWinFloat*>(var);
+			break;
+		}
+		case INT: {
+			v[0] = *static_cast<hfWinInt*>(var);
+			break;
+		}
+		case BOOL: {
+			v[0] = *static_cast<hfWinBool*>(var);
+			break;
+		}
+		default: {
+			common->FatalError( "hfRegister::SetToRegs: bad reg type" );
+			break;
+		}
+	}
+	for ( i = 0; i < regCount; i++ ) {
+		registers[ regs[ i ] ] = v[i];
+	}
+}
+
+/*
+=================
+hfRegister::GetFromRegs
+=================
+*/
+void hfRegister::GetFromRegs( float *registers ) {
+	hfVec4 v;
+	hfRectangle rect;
+
+	if (!enabled || var == NULL || (var && (var->GetDict() || !var->GetEval()))) {
+		return;
+	}
+
+	for ( int i = 0; i < regCount; i++ ) {
+		v[i] = registers[regs[i]];
+	}
+	
+	switch( type ) {
+		case VEC4: {
+			*dynamic_cast<hfWinVec4*>(var) = v;
+			break;
+		}
+		case RECTANGLE: {
+			rect.x = v.x;
+			rect.y = v.y;
+			rect.w = v.z;
+			rect.h = v.w;
+			*static_cast<hfWinRectangle*>(var) = rect;
+			break;
+		}
+		case VEC2: {
+			*static_cast<hfWinVec2*>(var) = v.ToVec2();
+			break;
+		}
+		case VEC3: {
+			*static_cast<hfWinVec3*>(var) = v.ToVec3();
+			break;
+		}
+		case FLOAT: {
+			*static_cast<hfWinFloat*>(var) = v[0];
+			break;
+		}
+		case INT: {
+			*static_cast<hfWinInt*>(var) = v[0];
+			break;
+		}
+		case BOOL: {
+			*static_cast<hfWinBool*>(var) = ( v[0] != 0.0f );
+			break;
+		}
+		default: {
+			common->FatalError( "hfRegister::GetFromRegs: bad reg type" );
+			break;
+		}
+	}
+}
+
+/*
+=================
+hfRegister::ReadFromDemoFile
+=================
+*/
+void hfRegister::ReadFromDemoFile(hfDemoFile *f) {
+	f->ReadBool( enabled );
+	f->ReadShort( type );
+	f->ReadInt( regCount );
+	for ( int i = 0; i < 4; i++ )
+		f->ReadUnsignedShort( regs[i] );
+	name = f->ReadHashString();
+}
+
+/*
+=================
+hfRegister::WriteToDemoFile
+=================
+*/
+void hfRegister::WriteToDemoFile( hfDemoFile *f ) {
+	f->WriteBool( enabled );
+	f->WriteShort( type );
+	f->WriteInt( regCount );
+	for (int i = 0; i < 4; i++)
+		f->WriteUnsignedShort( regs[i] );
+	f->WriteHashString( name );
+}
+
+/*
+=================
+hfRegister::WriteToSaveGame
+=================
+*/
+void hfRegister::WriteToSaveGame( hfFile *savefile ) {
+	int len;
+
+	savefile->Write( &enabled, sizeof( enabled ) );
+	savefile->Write( &type, sizeof( type ) );
+	savefile->Write( &regCount, sizeof( regCount ) );
+	savefile->Write( &regs[0], sizeof( regs ) );
+	
+	len = name.Length();
+	savefile->Write( &len, sizeof( len ) );
+	savefile->Write( name.c_str(), len );
+
+	var->WriteToSaveGame( savefile );
+}
+
+/*
+================
+hfRegister::ReadFromSaveGame
+================
+*/
+void hfRegister::ReadFromSaveGame( hfFile *savefile ) {
+	int len;
+
+	savefile->Read( &enabled, sizeof( enabled ) );
+	savefile->Read( &type, sizeof( type ) );
+	savefile->Read( &regCount, sizeof( regCount ) );
+	savefile->Read( &regs[0], sizeof( regs ) );
+
+	savefile->Read( &len, sizeof( len ) );
+	name.Fill( ' ', len );
+	savefile->Read( &name[0], len );
+
+	var->ReadFromSaveGame( savefile );
+}
+
+/*
+====================
+hfRegisterList::AddReg
+====================
+*/
+void hfRegisterList::AddReg( const char *name, int type, hfVec4 data, hfWindow *win, hfWinVar *var ) {
+	if ( FindReg( name ) == NULL ) {
+		assert( type >= 0 && type < hfRegister::NUMTYPES );
+		int numRegs = hfRegister::REGCOUNT[type];
+		hfRegister *reg = new (TAG_OLD_UI) hfRegister( name, type );
+		reg->var = var;
+		for ( int i = 0; i < numRegs; i++ ) {
+			reg->regs[i] = win->ExpressionConstant(data[i]);
+		}
+		int hash = regHash.GenerateKey( name, false );
+		regHash.Add( hash, regs.Append( reg ) );
+	}
+}
+
+/*
+====================
+hfRegisterList::AddReg
+====================
+*/
+void hfRegisterList::AddReg( const char *name, int type, hfTokenParser *src, hfWindow *win, hfWinVar *var ) {
+	hfRegister* reg;
+
+	reg = FindReg( name );
+
+	if ( reg == NULL ) {
+		assert(type >= 0 && type < hfRegister::NUMTYPES);
+		int numRegs = hfRegister::REGCOUNT[type];
+		reg = new (TAG_OLD_UI) hfRegister( name, type );
+		reg->var = var;
+		if ( type == hfRegister::STRING ) {
+			hfToken tok;
+			if ( src->ReadToken( &tok ) ) {
+				tok = hfLocalization::GetString( tok );
+				var->Init( tok, win );
+			}
+		} else {
+			for ( int i = 0; i < numRegs; i++ ) {
+				reg->regs[i] = win->ParseExpression(src, NULL);
+				if ( i < numRegs-1 ) {
+					src->ExpectTokenString(",");
+				}
+			}
+		}
+		int hash = regHash.GenerateKey( name, false );
+		regHash.Add( hash, regs.Append( reg ) );
+	} else {
+		int numRegs = hfRegister::REGCOUNT[type];
+		reg->var = var;
+		if ( type == hfRegister::STRING ) {
+			hfToken tok;
+			if ( src->ReadToken( &tok ) ) {
+				var->Init( tok, win );
+			}
+		} else {
+			for ( int i = 0; i < numRegs; i++ ) {
+				reg->regs[i] = win->ParseExpression( src, NULL );
+				if ( i < numRegs-1 ) {
+					src->ExpectTokenString(",");
+				}
+			}
+		}
+	}
+}
+
+/*
+====================
+hfRegisterList::GetFromRegs
+====================
+*/
+void hfRegisterList::GetFromRegs(float *registers) {
+	for ( int i = 0; i < regs.Num(); i++ ) {
+		regs[i]->GetFromRegs( registers );
+	}
+}
+
+/*
+====================
+hfRegisterList::SetToRegs
+====================
+*/
+
+void hfRegisterList::SetToRegs( float *registers ) {
+	int i;
+	for ( i = 0; i < regs.Num(); i++ ) {
+		regs[i]->SetToRegs( registers );
+	}
+}
+
+/*
+====================
+hfRegisterList::FindReg
+====================
+*/
+hfRegister *hfRegisterList::FindReg( const char *name ) {
+	int hash = regHash.GenerateKey( name, false );
+	for ( int i = regHash.First( hash ); i != -1; i = regHash.Next( i ) ) {
+		if ( regs[i]->name.Icmp( name ) == 0 ) {
+			return regs[i];
+		}
+	}
+	return NULL;
+}
+
+/*
+====================
+hfRegisterList::Reset
+====================
+*/
+void hfRegisterList::Reset() {
+	regs.DeleteContents( true );
+	regHash.Clear();
+}
+
+/*
+====================
+hfRegisterList::ReadFromSaveGame
+====================
+*/
+void hfRegisterList::ReadFromDemoFile(hfDemoFile *f) {
+	int c;
+
+	f->ReadInt( c );
+	regs.DeleteContents( true );
+	for ( int i = 0; i < c; i++ ) {
+		hfRegister *reg = new (TAG_OLD_UI) hfRegister;
+		reg->ReadFromDemoFile( f );
+		regs.Append( reg );
+	}
+}
+
+/*
+====================
+hfRegisterList::ReadFromSaveGame
+====================
+*/
+void hfRegisterList::WriteToDemoFile(hfDemoFile *f) {
+	int c = regs.Num();
+
+	f->WriteInt( c );
+	for ( int i = 0 ; i < c; i++ ) {
+		regs[i]->WriteToDemoFile(f);
+	}
+}
+
+/*
+=====================
+hfRegisterList::WriteToSaveGame
+=====================
+*/
+void hfRegisterList::WriteToSaveGame( hfFile *savefile ) {
+	int i, num;
+
+	num = regs.Num();
+	savefile->Write( &num, sizeof( num ) );
+
+	for ( i = 0; i < num; i++ ) {
+		regs[i]->WriteToSaveGame( savefile );
+	}
+}
+
+/*
+====================
+hfRegisterList::ReadFromSaveGame
+====================
+*/
+void hfRegisterList::ReadFromSaveGame( hfFile *savefile ) {
+	int i, num;
+
+	savefile->Read( &num, sizeof( num ) );
+	for ( i = 0; i < num; i++ ) {
+		regs[i]->ReadFromSaveGame( savefile );
+	}
+}
+

@@ -1,0 +1,2 @@
+/usr/bin/ar qc libhfassetlib.a CMakeFiles/hfassetlib.dir/hflib/hfAssetStore.cpp.o CMakeFiles/hfassetlib.dir/hflib/hfStr.cpp.o CMakeFiles/hfassetlib.dir/hflib/geometry/hfWinding.cpp.o
+/usr/bin/ranlib libhfassetlib.a

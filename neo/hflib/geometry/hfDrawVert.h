@@ -1,0 +1,726 @@
+#ifndef __DRAWVERT_H__
+#define __DRAWVERT_H__
+
+// The hardware converts a byte to a float by division with 255 and in the
+// vertex programs we convert the floating-point value in the range [0, 1]
+// to the range [-1, 1] by multiplying with 2 and subtracting 1.
+#define VERTEX_BYTE_TO_FLOAT( x )		( (x) * ( 2.0f / 255.0f ) - 1.0f )
+#define VERTEX_FLOAT_TO_BYTE( x )		hfMath::Ftob( ( (x) + 1.0f ) * ( 255.0f / 2.0f ) + 0.5f )
+
+// The hardware converts a byte to a float by division with 255 and in the
+// fragment programs we convert the floating-point value in the range [0, 1]
+// to the range [-1, 1] by multiplying with 2 and subtracting 1.
+// This is the conventional OpenGL mapping which specifies an exact
+// representation for -1 and +1 but not 0. The DirectX 10 mapping is
+// in the comments which specifies a non-linear mapping with an exact
+// representation of -1, 0 and +1 but -1 is represented twice.
+#define NORMALMAP_BYTE_TO_FLOAT( x )	VERTEX_BYTE_TO_FLOAT( x )	//( (x) - 128.0f ) * ( 1.0f / 127.0f )
+#define NORMALMAP_FLOAT_TO_BYTE( x )	VERTEX_FLOAT_TO_BYTE( x )	//hfMath::Ftob( 128.0f + 127.0f * (x) + 0.5f )
+
+/*
+================================================
+halfFloat_t
+================================================
+*/
+typedef unsigned short halfFloat_t;
+
+// GPU half-float bit patterns
+#define HF_MANTISSA(x)	(x&1023)
+#define HF_EXP(x)		((x&32767)>>10)
+#define HF_SIGN(x)		((x&32768)?-1:1)
+
+/*
+========================
+F16toF32
+========================
+*/
+HF_INLINE float F16toF32( halfFloat_t x ) {
+	int e = HF_EXP( x );
+	int m = HF_MANTISSA( x );
+	int s = HF_SIGN( x );
+
+	if ( 0 < e && e < 31 ) {
+		return s * powf( 2.0f, ( e - 15.0f ) ) * ( 1 + m / 1024.0f );
+	} else if ( m == 0 ) {
+        return s * 0.0f;
+	}
+    return s * powf( 2.0f, -14.0f ) * ( m / 1024.0f );
+}
+
+/*
+========================
+F32toF16
+========================
+*/
+HF_INLINE halfFloat_t F32toF16( float a ) {
+	unsigned int f = *(unsigned *)( &a );
+	unsigned int signbit  = ( f & 0x80000000 ) >> 16;
+	int exponent = ( ( f & 0x7F800000 ) >> 23 ) - 112;
+	unsigned int mantissa = ( f & 0x007FFFFF );
+
+	if ( exponent <= 0 ) {
+		return 0;
+	}
+	if ( exponent > 30 ) {
+		return (halfFloat_t)( signbit | 0x7BFF );
+	}
+
+	return (halfFloat_t)( signbit | ( exponent << 10 ) | ( mantissa >> 13 ) );
+}
+
+/*
+===============================================================================
+
+	Draw Vertex.
+
+===============================================================================
+*/
+
+class hfDrawVert {
+public:
+	hfVec3				xyz;			// 12 bytes
+	halfFloat_t			st[2];			// 4 bytes
+	byte				normal[4];		// 4 bytes
+	byte				tangent[4];		// 4 bytes -- [3] is texture polarity sign
+	byte				color[4];		// 4 bytes
+	byte				color2[4];		// 4 bytes -- weights for skinning
+
+	float				operator[]( const int index ) const;
+	float &				operator[]( const int index );
+
+	void				Clear();
+
+	const hfVec3		GetNormal() const;
+	const hfVec3		GetNormalRaw() const;		// not re-normalized for renderbump
+
+	// must be normalized already!
+	void				SetNormal( float x, float y, float z );
+	void				SetNormal( const hfVec3 & n );
+
+	const hfVec3		GetTangent() const;
+	const hfVec3		GetTangentRaw() const;		// not re-normalized for renderbump
+
+	// must be normalized already!
+	void				SetTangent( float x, float y, float z );
+	void				SetTangent( const hfVec3 & t );
+
+	// derived from normal, tangent, and tangent flag
+	const hfVec3 		GetBiTangent() const;
+	const hfVec3 		GetBiTangentRaw() const;	// not re-normalized for renderbump
+
+	void				SetBiTangent( float x, float y, float z );
+	HF_INLINE void		SetBiTangent( const hfVec3 & t );
+
+	float				GetBiTangentSign() const;
+	byte				GetBiTangentSignBit() const;
+
+	void				SetTexCoordNative( const halfFloat_t s, const halfFloat_t t );
+	void				SetTexCoord( const hfVec2 & st );
+	void				SetTexCoord( float s, float t );
+	void				SetTexCoordS( float s );
+	void				SetTexCoordT( float t );
+	const hfVec2		GetTexCoord() const;
+	const halfFloat_t	GetTexCoordNativeS() const;
+	const halfFloat_t	GetTexCoordNativeT() const;
+
+	// either 1.0f or -1.0f
+	HF_INLINE void		SetBiTangentSign( float sign );
+	HF_INLINE void		SetBiTangentSignBit( byte bit );
+
+	void				Lerp( const hfDrawVert &a, const hfDrawVert &b, const float f );
+	void				LerpAll( const hfDrawVert &a, const hfDrawVert &b, const float f );
+
+	void				SetColor( dword color );
+	void				SetNativeOrderColor( dword color );
+	dword				GetColor() const;
+
+	void				SetColor2( dword color );
+	void				SetNativeOrderColor2( dword color );
+	void				ClearColor2();
+	dword				GetColor2() const;
+
+	static hfDrawVert	GetSkinnedDrawVert( const hfDrawVert & vert, const hfJointMat * joints );
+	static hfVec3		GetSkinnedDrawVertPosition( const hfDrawVert & vert, const hfJointMat * joints );
+};
+
+#define DRAWVERT_SIZE				32
+#define DRAWVERT_XYZ_OFFSET			(0*4)
+#define DRAWVERT_ST_OFFSET			(3*4)
+#define DRAWVERT_NORMAL_OFFSET		(4*4)
+#define DRAWVERT_TANGENT_OFFSET		(5*4)
+#define DRAWVERT_COLOR_OFFSET		(6*4)
+#define DRAWVERT_COLOR2_OFFSET		(7*4)
+
+assert_offsetof( hfDrawVert, xyz,		DRAWVERT_XYZ_OFFSET );
+assert_offsetof( hfDrawVert, normal,	DRAWVERT_NORMAL_OFFSET );
+assert_offsetof( hfDrawVert, tangent,	DRAWVERT_TANGENT_OFFSET );
+
+/*
+========================
+VertexFloatToByte
+
+Assumes input is in the range [-1, 1]
+========================
+*/
+HF_INLINE void VertexFloatToByte( const float & x, const float & y, const float & z, byte * bval ) {
+	assert_4_byte_aligned( bval );	// for __stvebx
+
+#ifdef HF_WIN_X86_SSE2_INTRIN
+
+	const __m128 vector_float_one			= { 1.0f, 1.0f, 1.0f, 1.0f };
+	const __m128 vector_float_half			= { 0.5f, 0.5f, 0.5f, 0.5f };
+	const __m128 vector_float_255_over_2	= { 255.0f / 2.0f, 255.0f / 2.0f, 255.0f / 2.0f, 255.0f / 2.0f };
+
+	const __m128 xyz = _mm_unpacklo_ps( _mm_unpacklo_ps( _mm_load_ss( &x ), _mm_load_ss( &z ) ), _mm_load_ss( &y ) );
+	const __m128 xyzScaled = _mm_madd_ps( _mm_add_ps( xyz, vector_float_one ), vector_float_255_over_2, vector_float_half );
+	const __m128i xyzInt = _mm_cvtps_epi32( xyzScaled );
+	const __m128i xyzShort = _mm_packs_epi32( xyzInt, xyzInt );
+	const __m128i xyzChar = _mm_packus_epi16( xyzShort, xyzShort );
+	const __m128i xyz16 = _mm_unpacklo_epi8( xyzChar, _mm_setzero_si128() );
+
+	bval[0] = (byte)_mm_extract_epi16( xyz16, 0 );	// cannot use _mm_extract_epi8 because it is an SSE4 instruction
+	bval[1] = (byte)_mm_extract_epi16( xyz16, 1 );
+	bval[2] = (byte)_mm_extract_epi16( xyz16, 2 );
+
+#else
+
+	bval[0] = VERTEX_FLOAT_TO_BYTE( x );
+	bval[1] = VERTEX_FLOAT_TO_BYTE( y );
+	bval[2] = VERTEX_FLOAT_TO_BYTE( z );
+
+#endif
+}
+
+/*
+========================
+hfDrawVert::operator[]
+========================
+*/
+HF_INLINE float hfDrawVert::operator[]( const int index ) const {
+	assert( index >= 0 && index < 5 );
+	return ((float *)(&xyz))[index];
+}
+
+/*
+========================
+hfDrawVert::operator[]
+========================
+*/
+HF_INLINE float	&hfDrawVert::operator[]( const int index ) {
+	assert( index >= 0 && index < 5 );
+	return ((float *)(&xyz))[index];
+}
+
+/*
+========================
+hfDrawVert::Clear
+========================
+*/
+HF_INLINE void hfDrawVert::Clear() {
+	*reinterpret_cast<dword *>(&this->xyz.x) = 0;
+	*reinterpret_cast<dword *>(&this->xyz.y) = 0;
+	*reinterpret_cast<dword *>(&this->xyz.z) = 0;
+	*reinterpret_cast<dword *>(this->st) = 0;
+	*reinterpret_cast<dword *>(this->normal) = 0x00FF8080;	// x=0, y=0, z=1
+	*reinterpret_cast<dword *>(this->tangent) = 0xFF8080FF;	// x=1, y=0, z=0
+	*reinterpret_cast<dword *>(this->color) = 0;
+	*reinterpret_cast<dword *>(this->color2) = 0;
+}
+
+/*
+========================
+hfDrawVert::GetNormal
+========================
+*/
+HF_INLINE const hfVec3 hfDrawVert::GetNormal() const {
+	hfVec3 n(	VERTEX_BYTE_TO_FLOAT( normal[0] ),
+				VERTEX_BYTE_TO_FLOAT( normal[1] ),
+				VERTEX_BYTE_TO_FLOAT( normal[2] ) );
+	n.Normalize();	// after the normal has been compressed & uncompressed, it may not be normalized anymore
+	return n;
+}
+
+/*
+========================
+hfDrawVert::GetNormalRaw
+========================
+*/
+HF_INLINE const hfVec3 hfDrawVert::GetNormalRaw() const {
+	hfVec3 n(	VERTEX_BYTE_TO_FLOAT( normal[0] ),
+				VERTEX_BYTE_TO_FLOAT( normal[1] ),
+				VERTEX_BYTE_TO_FLOAT( normal[2] ) );
+	// don't re-normalize just like we do in the vertex programs
+	return n;
+}
+
+/*
+========================
+hfDrawVert::SetNormal
+must be normalized already!
+========================
+*/
+HF_INLINE void hfDrawVert::SetNormal( const hfVec3 & n ) {
+	VertexFloatToByte( n.x, n.y, n.z, normal );
+}
+
+/*
+========================
+hfDrawVert::SetNormal
+========================
+*/
+HF_INLINE void hfDrawVert::SetNormal( float x, float y, float z ) {
+	VertexFloatToByte( x, y, z, normal );
+}
+
+/*
+========================
+&hfDrawVert::GetTangent
+========================
+*/
+HF_INLINE const hfVec3 hfDrawVert::GetTangent() const {
+	hfVec3 t(	VERTEX_BYTE_TO_FLOAT( tangent[0] ),
+				VERTEX_BYTE_TO_FLOAT( tangent[1] ),
+				VERTEX_BYTE_TO_FLOAT( tangent[2] ) );
+	t.Normalize();
+	return t;
+}
+
+/*
+========================
+&hfDrawVert::GetTangentRaw
+========================
+*/
+HF_INLINE const hfVec3 hfDrawVert::GetTangentRaw() const {
+	hfVec3 t(	VERTEX_BYTE_TO_FLOAT( tangent[0] ),
+				VERTEX_BYTE_TO_FLOAT( tangent[1] ),
+				VERTEX_BYTE_TO_FLOAT( tangent[2] ) );
+	// don't re-normalize just like we do in the vertex programs
+	return t;
+}
+
+/*
+========================
+hfDrawVert::SetTangent
+========================
+*/
+HF_INLINE void hfDrawVert::SetTangent( float x, float y, float z ) {
+	VertexFloatToByte( x, y, z, tangent );
+}
+
+/*
+========================
+hfDrawVert::SetTangent
+========================
+*/
+HF_INLINE void hfDrawVert::SetTangent( const hfVec3 & t ) {
+	VertexFloatToByte( t.x, t.y, t.z, tangent );
+}
+
+/*
+========================
+hfDrawVert::GetBiTangent
+========================
+*/
+HF_INLINE const hfVec3 hfDrawVert::GetBiTangent() const {
+	// derive from the normal, tangent, and bitangent direction flag
+	hfVec3 bitangent;
+	bitangent.Cross( GetNormal(), GetTangent() );
+	bitangent *= GetBiTangentSign();
+	return bitangent;
+}
+
+/*
+========================
+hfDrawVert::GetBiTangentRaw
+========================
+*/
+HF_INLINE const hfVec3 hfDrawVert::GetBiTangentRaw() const {
+	// derive from the normal, tangent, and bitangent direction flag
+	// don't re-normalize just like we do in the vertex programs
+	hfVec3 bitangent;
+	bitangent.Cross( GetNormalRaw(), GetTangentRaw() );
+	bitangent *= GetBiTangentSign();
+	return bitangent;
+}
+
+/*
+========================
+hfDrawVert::SetBiTangent
+========================
+*/
+HF_INLINE void hfDrawVert::SetBiTangent( float x, float y, float z ) {
+	SetBiTangent( hfVec3( x, y, z ) );
+}
+
+/*
+========================
+hfDrawVert::SetBiTangent
+========================
+*/
+HF_INLINE void hfDrawVert::SetBiTangent( const hfVec3 &t ) {
+	hfVec3 bitangent;
+	bitangent.Cross( GetNormal(), GetTangent() );
+	SetBiTangentSign( bitangent * t );
+}
+
+/*
+========================
+hfDrawVert::GetBiTangentSign
+========================
+*/
+HF_INLINE float hfDrawVert::GetBiTangentSign() const {
+	return ( tangent[3] < 128 ) ? -1.0f : 1.0f;
+}
+
+/*
+========================
+hfDrawVert::GetBiTangentSignBit
+========================
+*/
+HF_INLINE byte hfDrawVert::GetBiTangentSignBit() const {
+	return ( tangent[3] < 128 ) ? 1 : 0;
+}
+
+/*
+========================
+hfDrawVert::SetBiTangentSign
+========================
+*/
+HF_INLINE void hfDrawVert::SetBiTangentSign( float sign ) {
+	tangent[3] = ( sign < 0.0f ) ? 0 : 255;
+}
+
+/*
+========================
+hfDrawVert::SetBiTangentSignBit
+========================
+*/
+HF_INLINE void hfDrawVert::SetBiTangentSignBit( byte sign ) {
+	tangent[3] = sign ? 0 : 255;
+}
+
+/*
+========================
+hfDrawVert::Lerp
+========================
+*/
+HF_INLINE void hfDrawVert::Lerp( const hfDrawVert &a, const hfDrawVert &b, const float f ) {
+	xyz = a.xyz + f * ( b.xyz - a.xyz );
+	SetTexCoord( ::Lerp( a.GetTexCoord(), b.GetTexCoord(), f ) );
+}
+
+/*
+========================
+hfDrawVert::LerpAll
+========================
+*/
+HF_INLINE void hfDrawVert::LerpAll( const hfDrawVert &a, const hfDrawVert &b, const float f ) {
+	xyz = ::Lerp( a.xyz, b.xyz, f );
+	SetTexCoord( ::Lerp( a.GetTexCoord(), b.GetTexCoord(), f ) );
+
+	hfVec3 normal = ::Lerp( a.GetNormal(), b.GetNormal(), f );
+	hfVec3 tangent = ::Lerp( a.GetTangent(), b.GetTangent(), f );
+	hfVec3 bitangent = ::Lerp( a.GetBiTangent(), b.GetBiTangent(), f );
+	normal.Normalize();
+	tangent.Normalize();
+	bitangent.Normalize();
+	SetNormal( normal );
+	SetTangent( tangent );
+	SetBiTangent( bitangent );
+
+	color[0] = (byte)( a.color[0] + f * ( b.color[0] - a.color[0] ) );
+	color[1] = (byte)( a.color[1] + f * ( b.color[1] - a.color[1] ) );
+	color[2] = (byte)( a.color[2] + f * ( b.color[2] - a.color[2] ) );
+	color[3] = (byte)( a.color[3] + f * ( b.color[3] - a.color[3] ) );
+
+	color2[0] = (byte)( a.color2[0] + f * ( b.color2[0] - a.color2[0] ) );
+	color2[1] = (byte)( a.color2[1] + f * ( b.color2[1] - a.color2[1] ) );
+	color2[2] = (byte)( a.color2[2] + f * ( b.color2[2] - a.color2[2] ) );
+	color2[3] = (byte)( a.color2[3] + f * ( b.color2[3] - a.color2[3] ) );
+}
+
+/*
+========================
+hfDrawVert::SetNativeOrderColor
+========================
+*/
+HF_INLINE void hfDrawVert::SetNativeOrderColor( dword color ) {
+	*reinterpret_cast<dword *>(this->color) = color;
+}
+
+/*
+========================
+hfDrawVert::SetColor
+========================
+*/
+HF_INLINE void hfDrawVert::SetColor( dword color ) {
+	*reinterpret_cast<dword *>(this->color) = color;
+}
+
+/*
+========================
+hfDrawVert::SetColor
+========================
+*/
+HF_INLINE dword hfDrawVert::GetColor() const {
+	return *reinterpret_cast<const dword *>(this->color);
+}
+
+/*
+========================
+hfDrawVert::SetTexCoordNative
+========================
+*/
+HF_INLINE void hfDrawVert::SetTexCoordNative( const halfFloat_t s, const halfFloat_t t ) {
+	st[0] = s;
+	st[1] = t;
+}
+
+/*
+========================
+hfDrawVert::SetTexCoord
+========================
+*/
+HF_INLINE void hfDrawVert::SetTexCoord( const hfVec2 & st ) {
+	SetTexCoordS( st.x );
+	SetTexCoordT( st.y );
+}
+
+/*
+========================
+hfDrawVert::SetTexCoord
+========================
+*/
+HF_INLINE void hfDrawVert::SetTexCoord( float s, float t ) {
+	SetTexCoordS( s );
+	SetTexCoordT( t );
+}
+
+/*
+========================
+hfDrawVert::SetTexCoordS
+========================
+*/
+HF_INLINE void hfDrawVert::SetTexCoordS( float s ) {
+	st[0] = F32toF16( s );
+}
+
+/*
+========================
+hfDrawVert::SetTexCoordT
+========================
+*/
+HF_INLINE void hfDrawVert::SetTexCoordT( float t ) {
+	st[1] = F32toF16( t );
+}
+
+/*
+========================
+hfDrawVert::GetTexCoord
+========================
+*/
+HF_INLINE const hfVec2	hfDrawVert::GetTexCoord() const {
+	return hfVec2( F16toF32( st[0] ), F16toF32( st[1] ) );
+}
+
+/*
+========================
+hfDrawVert::GetTexCoordNativeS
+========================
+*/
+HF_INLINE const halfFloat_t hfDrawVert::GetTexCoordNativeS() const {
+	return st[0];
+}
+
+/*
+========================
+hfDrawVert::GetTexCoordNativeT
+========================
+*/
+HF_INLINE const halfFloat_t hfDrawVert::GetTexCoordNativeT() const {
+	return st[1];
+}
+
+/*
+========================
+hfDrawVert::SetNativeOrderColor2
+========================
+*/
+HF_INLINE void hfDrawVert::SetNativeOrderColor2( dword color2 ) {
+	*reinterpret_cast<dword *>(this->color2) = color2;
+}
+
+/*
+========================
+hfDrawVert::SetColor
+========================
+*/
+HF_INLINE void hfDrawVert::SetColor2( dword color2 ) {
+	*reinterpret_cast<dword *>(this->color2) = color2;
+}
+
+/*
+========================
+hfDrawVert::ClearColor2
+========================
+*/
+HF_INLINE void hfDrawVert::ClearColor2() {
+	*reinterpret_cast<dword *>(this->color2) = 0x80808080;
+}
+
+/*
+========================
+hfDrawVert::GetColor2
+========================
+*/
+HF_INLINE dword hfDrawVert::GetColor2() const {
+	return *reinterpret_cast<const dword *>(this->color2);
+}
+
+/*
+========================
+WriteDrawVerts16
+
+Use 16-byte in-order SIMD writes because the destVerts may live in write-combined memory
+========================
+*/
+HF_INLINE void WriteDrawVerts16( hfDrawVert * destVerts, const hfDrawVert * localVerts, int numVerts ) {
+	assert_sizeof( hfDrawVert, 32 );
+	assert_16_byte_aligned( destVerts );
+	assert_16_byte_aligned( localVerts );
+
+#ifdef HF_WIN_X86_SSE2_INTRIN
+
+	for ( int i = 0; i < numVerts; i++ ) {
+		__m128i v0 = _mm_load_si128( (const __m128i *)( (byte *)( localVerts + i ) +  0 ) );
+		__m128i v1 = _mm_load_si128( (const __m128i *)( (byte *)( localVerts + i ) + 16 ) );
+		_mm_stream_si128( (__m128i *)( (byte *)( destVerts + i ) +  0 ), v0 );
+		_mm_stream_si128( (__m128i *)( (byte *)( destVerts + i ) + 16 ), v1 );
+	}
+
+#else
+
+	memcpy( destVerts, localVerts, numVerts * sizeof( hfDrawVert ) );
+
+#endif
+}
+
+/*
+=====================
+hfDrawVert::GetSkinnedDrawVert
+=====================
+*/
+HF_INLINE hfDrawVert hfDrawVert::GetSkinnedDrawVert( const hfDrawVert & vert, const hfJointMat * joints ) {
+	if ( joints == NULL ) {
+		return vert;
+	}
+
+	const hfJointMat & j0 = joints[vert.color[0]];
+	const hfJointMat & j1 = joints[vert.color[1]];
+	const hfJointMat & j2 = joints[vert.color[2]];
+	const hfJointMat & j3 = joints[vert.color[3]];
+
+	const float w0 = vert.color2[0] * ( 1.0f / 255.0f );
+	const float w1 = vert.color2[1] * ( 1.0f / 255.0f );
+	const float w2 = vert.color2[2] * ( 1.0f / 255.0f );
+	const float w3 = vert.color2[3] * ( 1.0f / 255.0f );
+
+	hfJointMat accum;
+	hfJointMat::Mul( accum, j0, w0 );
+	hfJointMat::Mad( accum, j1, w1 );
+	hfJointMat::Mad( accum, j2, w2 );
+	hfJointMat::Mad( accum, j3, w3 );
+
+	hfDrawVert outVert;
+	outVert.xyz = accum * hfVec4( vert.xyz.x, vert.xyz.y, vert.xyz.z, 1.0f );
+	outVert.SetTexCoordNative( vert.GetTexCoordNativeS(), vert.GetTexCoordNativeT() );
+	outVert.SetNormal( accum * vert.GetNormal() );
+	outVert.SetTangent( accum * vert.GetTangent() );
+	outVert.tangent[3] = vert.tangent[3];
+	for ( int i = 0; i < 4; i++ ) {
+		outVert.color[i] = vert.color[i];
+		outVert.color2[i] = vert.color2[i];
+	}
+	return outVert;
+}
+
+/*
+=====================
+hfDrawVert::GetSkinnedDrawVertPosition
+=====================
+*/
+HF_INLINE hfVec3 hfDrawVert::GetSkinnedDrawVertPosition( const hfDrawVert & vert, const hfJointMat * joints ) {
+	if ( joints == NULL ) {
+		return vert.xyz;
+	}
+
+	const hfJointMat & j0 = joints[vert.color[0]];
+	const hfJointMat & j1 = joints[vert.color[1]];
+	const hfJointMat & j2 = joints[vert.color[2]];
+	const hfJointMat & j3 = joints[vert.color[3]];
+
+	const float w0 = vert.color2[0] * ( 1.0f / 255.0f );
+	const float w1 = vert.color2[1] * ( 1.0f / 255.0f );
+	const float w2 = vert.color2[2] * ( 1.0f / 255.0f );
+	const float w3 = vert.color2[3] * ( 1.0f / 255.0f );
+
+	hfJointMat accum;
+	hfJointMat::Mul( accum, j0, w0 );
+	hfJointMat::Mad( accum, j1, w1 );
+	hfJointMat::Mad( accum, j2, w2 );
+	hfJointMat::Mad( accum, j3, w3 );
+
+	return accum * hfVec4( vert.xyz.x, vert.xyz.y, vert.xyz.z, 1.0f );
+}
+
+/*
+===============================================================================
+Shadow Vertex
+===============================================================================
+*/
+class hfShadowVert {
+public:
+	hfVec4			xyzw;
+
+	void			Clear();
+	static int		CreateShadowCache( hfShadowVert * vertexCache, const hfDrawVert *verts, const int numVerts );
+};
+
+#define SHADOWVERT_XYZW_OFFSET		(0)
+
+assert_offsetof( hfShadowVert, xyzw, SHADOWVERT_XYZW_OFFSET );
+
+HF_INLINE void hfShadowVert::Clear() {
+	xyzw.Zero();
+}
+
+/*
+===============================================================================
+Skinned Shadow Vertex
+===============================================================================
+*/
+class hfShadowVertSkinned {
+public:
+	hfVec4			xyzw;
+	byte			color[4];
+	byte			color2[4];
+	byte			pad[8];		// pad to multiple of 32-byte for glDrawElementsBaseVertex
+
+	void			Clear();
+	static int		CreateShadowCache( hfShadowVertSkinned * vertexCache, const hfDrawVert *verts, const int numVerts );
+};
+
+#define SHADOWVERTSKINNED_XYZW_OFFSET		(0)
+#define SHADOWVERTSKINNED_COLOR_OFFSET		(16)
+#define SHADOWVERTSKINNED_COLOR2_OFFSET		(20)
+
+assert_offsetof( hfShadowVertSkinned, xyzw, SHADOWVERTSKINNED_XYZW_OFFSET );
+assert_offsetof( hfShadowVertSkinned, color, SHADOWVERTSKINNED_COLOR_OFFSET );
+assert_offsetof( hfShadowVertSkinned, color2, SHADOWVERTSKINNED_COLOR2_OFFSET );
+
+HF_INLINE void hfShadowVertSkinned::Clear() {
+	xyzw.Zero();
+}
+
+#endif /* !__DRAWVERT_H__ */
+

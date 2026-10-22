@@ -1,0 +1,21 @@
+# Hellforge Arena
+#
+# A sample game written in the English hfscript dialect (.eng).  The C++
+# simulation (neo/hflib/game/hfArena.h) owns the player, enemies, bullets
+# and physics; this script only decides how to steer, one tick at a time.
+
+define main
+    arena_reset(20260610)
+    while arena_running() is 1
+        if arena_hp() is less than 40
+            arena_retreat()
+        otherwise
+            arena_attack()
+        arena_step()
+    if arena_wave() is at least 5
+        show "arena cleared"
+    otherwise
+        show "arena lost"
+    show arena_score()
+    show arena_ticks()
+main()
