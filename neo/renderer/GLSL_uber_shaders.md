@@ -1856,3 +1856,137 @@ Harness output: `phase 9 ui widgets: ok` → `ALL PASSED`, plain and
   pass so the frontend (Phase 16) can call it at the right point in the frame.
 - **No navigation.** Focus is mouse-driven; gamepad/keyboard focus order and
   `ui.submit` are Phase 16–17 work.
+
+## 24. Phase 16 — The frontend: screens, HUD, and the renderer hook
+
+Phase 14–15 gave the engine a widget kit. Phase 16 gives it somewhere to live:
+a screen-flow state machine that starts at a title screen, owns one UI tree
+per screen, mirrors the arena simulation into a HUD, and hands the tree to the
+renderer once per frame.
+
+### The state machine
+
+`neo/hflib/ui/hfUiFrontend.h` defines:
+
+```
+BOOT -> TITLE -> MENU (options)
+         TITLE -> PLAYING <-> PAUSED
+         PLAYING -> RESULTS -> PLAYING | TITLE
+         any -> LOADING -> PLAYING
+```
+
+Every screen is a fresh tree. `SetState()` calls `Registry::Clear()`, resets
+the input latch, and rebuilds, so a transition cannot leave a widget, a hover
+target or a dangling parent pointer behind. Because the frontend owns its
+registry and UI system, the addresses handed to the renderer stay stable across
+transitions.
+
+Actions are an enum (`START`, `OPTIONS`, `BACK`, `PAUSE`, `RESUME`, `RESTART`,
+`MAIN_MENU`, `QUIT`) rather than widgets calling each other directly. Buttons
+are bound to actions at build time; a click is looked up and applied *after*
+input dispatch, so a screen transition never destroys entities while the input
+system is still iterating the registry.
+
+Two things are observable from outside the class, which is what makes the
+frontend testable and hostable:
+
+- `ui.state` is published on the event bus with `{ state, previous }` on every
+  transition.
+- every applied action is appended to a bounded, deterministic action log
+  (`GetActionLogCount` / `GetActionLog`).
+
+### Screens
+
+- **Title** — name, subtitle, PLAY / OPTIONS / QUIT.
+- **Options** — music and SFX sliders (0…100), a fullscreen checkbox. The
+  checkbox flips through the generic `hfUiToggleComponent` path added in
+  `hfUiInput`: click, flip `checked`, publish `ui.change`. Values are stored on
+  the frontend so the host can persist them (Phase 17).
+- **Playing** — HUD labels for score / health / wave plus a PAUSE button.
+- **Paused** — dimmed overlay, RESUME / RESTART / MAIN MENU / QUIT.
+- **Results** — VICTORY or GAME OVER, final score, PLAY AGAIN / MAIN MENU /
+  QUIT.
+- **Loading** — a placeholder a host can show while a level loads; `BeginGame()`
+  moves it to PLAYING.
+
+### Input
+
+`HandleSysEvent( const sysEvent_t & )` is the engine-facing adapter:
+
+- `SE_MOUSE` accumulates relative deltas; `SE_MOUSE_ABSOLUTE` sets the cursor
+  directly.
+- `SE_KEY` in the `K_MOUSE1..K_MOUSE8` range becomes a UI mouse button.
+- Enter/Space activates the focused control; Escape maps onto `Back()`, which
+  is context sensitive (pause while playing, resume while paused, up a level in
+  the menu, to the title from results).
+
+The same behaviour is available headlessly through `SetMouse` / `SetButton` /
+`Update`, which is exactly what the harness drives.
+
+### Arena binding
+
+`SetArena()` is optional. When attached, PLAYING advances the sim at a fixed
+60 Hz (`1/60` accumulated, at most 8 steps per frame so a stall cannot spiral),
+the HUD is rewritten from `score`/`hitPoints`/`wave` after each frame, and a
+sim that reports game over transitions to RESULTS. PAUSED simply does not
+step, which is what "the pause menu freezes the sim" means in practice.
+
+### Renderer wiring
+
+`hfUiDrawPass` gained an installed-source model:
+
+```cpp
+hfUiDrawPass::SetSource( frontend.RegistryPtr(), frontend.SystemPtr() );
+```
+
+and `RB_ExecuteBackEndCommands` calls `hfUiDrawPass::DrawInstalled()` once after
+the frame's 3D views. That placement matters: `RB_DrawView` bails out early
+when a view has no surfaces, so hanging the overlay off a view would make the
+title screen invisible on exactly the frames where there is no world to draw.
+`DrawInstalled()` resets the viewport and scissor to the full window, is a
+no-op when no source is installed, and is a no-op under `--headless` (no GL
+context exists).
+
+Text now reaches the GPU as well: labels are rasterized at their real scale
+into a window-sized 8-bit coverage buffer, uploaded as one `GL_INTENSITY`
+texture, and blended over the widget quads. Centering/right alignment uses the
+metrics already resolved by `hfUiSystem`, so a button label is centred in the
+button rather than pinned to its corner. One texture upload per frame is
+trivial at UI resolutions and avoids introducing a font atlas before the theme
+resource exists.
+
+### Verification
+
+`Test_UiFrontend` drives the whole flow through real controls — it finds a
+button by action, reads its resolved rect, moves the mouse to the centre and
+presses/releases:
+
+- TITLE → PLAYING via PLAY; the arena is reset and HP restored.
+- The HUD mirrors `score`/`hitPoints`/`wave` (`SCORE 123`, `HP 42`, `WAVE 3/5`).
+- PAUSE freezes the sim (tick count unchanged over two 0.25 s frames).
+- RESUME advances it again; RESTART resets it.
+- `gameOver` + `won` → RESULTS showing VICTORY.
+- PLAY AGAIN → PLAYING; PAUSED → MAIN MENU → TITLE.
+- OPTIONS → MENU; the fullscreen checkbox toggles and publishes `ui.change`.
+- QUIT raises `QuitRequested()` and publishes `ui.quit` exactly once.
+- LOADING → `BeginGame()` → PLAYING.
+- Escape pauses/resumes; Enter activates the focused control.
+- The action log is exactly the 14 actions performed and the state-event count
+  is exactly 18, so a regression in transition ordering fails the test.
+
+Harness output: `phase 10 frontend: ok` → `ALL PASSED`, plain and `--headless`,
+default and Jolt.
+
+### Known gaps
+
+- **The engine's `main()` still boots the legacy menu.** The frontend is a
+  complete, tested module with a renderer hook; mounting it in
+  `hfCommonLocal::Init` instead of `StartMenu()` is the remaining wiring step,
+  and it needs the desktop main loop that the legacy UI currently owns.
+- **No gamepad navigation.** Focus is set by mouse or by a test; D-pad/stick
+  focus traversal and a focus ring are Phase 17.
+- **Sliders do not drag.** A click on a slider emits `ui.click`; press-drag
+  value tracking needs pointer capture and is deferred.
+- **Text is one colour.** The coverage texture is blended white; per-label
+  colours need a glyph atlas or a per-label batch.
+- **No fade/transition animation.** Screens swap instantly.

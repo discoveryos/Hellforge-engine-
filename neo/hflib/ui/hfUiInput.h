@@ -126,6 +126,15 @@ public:
 						hfStr::Copynz( ch.text, "", sizeof(ch.text) );
 						bus.Publish( "ui.change", &ch, sizeof(ch) );
 					}
+
+					// checkbox / toggle widget
+					hfUiToggleComponent *tog = registry.GetComponent< hfUiToggleComponent >( m_pressed );
+					if ( tog && !tog->disabled ) {
+						tog->checked = !tog->checked;
+						hfUiEventChange ch = { m_pressed, tog->checked ? 1.0f : 0.0f, tog->checked ? 1 : 0 };
+						hfStr::Copynz( ch.text, "", sizeof(ch.text) );
+						bus.Publish( "ui.change", &ch, sizeof(ch) );
+					}
 				} else if ( m_pressed != HF_Ecs::ENTITY_NULL ) {
 					// released outside
 					hfUiEventRelease rev = { m_pressed, b, m_mouseX, m_mouseY };
@@ -141,6 +150,21 @@ public:
 
 	void EndFrame() {
 		for ( int i = 0; i < HF_UI_MOUSE_COUNT; i++ ) {
+			m_buttonPressed[i] = false;
+			m_buttonReleased[i] = false;
+		}
+	}
+
+	// Drop all interaction state.  A frontend rebuilds (and therefore
+	// invalidates) its whole entity graph on a state change, so any held
+	// hover/press/focus target no longer exists.
+	void Reset() {
+		m_hovered = HF_Ecs::ENTITY_NULL;
+		m_pressed = HF_Ecs::ENTITY_NULL;
+		m_focused = HF_Ecs::ENTITY_NULL;
+		m_pressedButton = -1;
+		for ( int i = 0; i < HF_UI_MOUSE_COUNT; i++ ) {
+			m_buttonDown[i] = false;
 			m_buttonPressed[i] = false;
 			m_buttonReleased[i] = false;
 		}

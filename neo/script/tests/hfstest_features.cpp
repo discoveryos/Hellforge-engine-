@@ -31,6 +31,7 @@
 #include "../../hflib/console/hfConsoleServices.h"
 #include "../../hflib/ui/hfUiBuilder.h"
 #include "../../hflib/ui/hfUiInput.h"
+#include "../../hflib/ui/hfUiFrontend.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -2855,6 +2856,7 @@ static void Test_Animation();
 static void Test_Game();
 static void Test_Console();
 static void Test_UiWidgets();
+static void Test_UiFrontend();
 
 /*
 ================================
@@ -3220,6 +3222,7 @@ int HfTest_FeaturesMain() {
 	Test_Game();
 	Test_Console();
 	Test_UiWidgets();
+	Test_UiFrontend();
 	printf( "features logic: %s (%d failures)\n", g_featFails == 0 ? "ok" : "FAIL", g_featFails );
 	return g_featFails;
 }
@@ -3697,4 +3700,196 @@ static void Test_UiWidgets() {
 	
 	int added = g_featFails - fc;
 	printf( "phase 9 ui widgets: %s\n", added ? "FAIL" : "ok" );
+}
+
+// Phase 16 - frontend state machine, HUD binding, system input routing
+static void Test_UiFrontend() {
+	using namespace HF_Ui;
+	typedef hfUiFrontend Fe;
+	int fc = g_featFails;
+
+	struct StateTap { int count; int last; int previous; };
+	StateTap tap = { 0, -1, -1 };
+	HF_Ecs::eventHandler_t onState = []( const char *name, const void *data, int size, void *user ) {
+		( void )name;
+		if ( data == NULL || size < ( int )sizeof( hfUiEventState ) ) { return; }
+		StateTap *t = ( StateTap * )user;
+		const hfUiEventState *ev = ( const hfUiEventState * )data;
+		t->count++;
+		t->last = ev->state;
+		t->previous = ev->previous;
+	};
+
+	int quitEvents = 0;
+	HF_Ecs::eventHandler_t onQuit = []( const char *name, const void *data, int size, void *user ) {
+		( void )name; ( void )data; ( void )size;
+		( *( int * )user )++;
+	};
+
+	HF_Ecs::EventBus bus;
+	bus.Subscribe( "ui.state", onState, &tap );
+	bus.Subscribe( "ui.quit", onQuit, &quitEvents );
+
+	HfArena arena;
+	arena.Reset( 7 );
+
+	hfUiFrontend fe;
+	fe.SetArena( &arena );
+	fe.Init( bus, 1024.0f, 768.0f );
+
+	FEAT_ASSERT( fe.GetState() == Fe::HF_UI_FRONTEND_TITLE );
+	FEAT_ASSERT( tap.count == 1 );
+	FEAT_ASSERT( tap.last == Fe::HF_UI_FRONTEND_TITLE );
+	FEAT_ASSERT( tap.previous == Fe::HF_UI_FRONTEND_BOOT );
+	FEAT_ASSERT( fe.FindAction( Fe::HF_UI_ACTION_START ) != HF_Ecs::ENTITY_NULL );
+	FEAT_ASSERT( fe.FindAction( Fe::HF_UI_ACTION_OPTIONS ) != HF_Ecs::ENTITY_NULL );
+	FEAT_ASSERT( fe.FindAction( Fe::HF_UI_ACTION_QUIT ) != HF_Ecs::ENTITY_NULL );
+
+	auto click = [ & ]( HF_Ecs::Entity e ) -> bool {
+		if ( e == HF_Ecs::ENTITY_NULL ) { return false; }
+		const hfUiRect r = fe.System().GetRect( e );
+		FEAT_ASSERT( !r.Empty() );
+		fe.SetMouse( r.x + r.w * 0.5f, r.y + r.h * 0.5f );
+		fe.SetButton( HF_UI_MOUSE_LEFT, true );
+		fe.Update( 1.0f / 60.0f );
+		fe.SetButton( HF_UI_MOUSE_LEFT, false );
+		fe.Update( 1.0f / 60.0f );
+		return true;
+	};
+
+	auto labelText = [ & ]( HF_Ecs::Entity e ) -> const char * {
+		hfUiLabelComponent *l = fe.RegistryPtr()->GetComponent< hfUiLabelComponent >( e );
+		return l != NULL ? l->text : "";
+	};
+
+	// TITLE -> PLAYING
+	FEAT_ASSERT( click( fe.FindAction( Fe::HF_UI_ACTION_START ) ) );
+	FEAT_ASSERT( fe.GetState() == Fe::HF_UI_FRONTEND_PLAYING );
+	FEAT_ASSERT( !arena.gameOver );
+	FEAT_ASSERT( arena.hitPoints == HfArena::PLAYER_HITPOINTS );
+
+	// HUD mirrors the simulation
+	FEAT_ASSERT( fe.GetHudLabel( Fe::HF_UI_HUD_SCORE ) != HF_Ecs::ENTITY_NULL );
+	arena.score = 123;
+	arena.hitPoints = 42;
+	arena.wave = 3;
+	fe.Update( 0.0f );
+	FEAT_ASSERT( strcmp( labelText( fe.GetHudLabel( Fe::HF_UI_HUD_SCORE ) ), "SCORE 123" ) == 0 );
+	FEAT_ASSERT( strcmp( labelText( fe.GetHudLabel( Fe::HF_UI_HUD_HEALTH ) ), "HP 42" ) == 0 );
+	FEAT_ASSERT( strcmp( labelText( fe.GetHudLabel( Fe::HF_UI_HUD_WAVE ) ), "WAVE 3/5" ) == 0 );
+
+	// PLAYING -> PAUSED freezes the simulation
+	FEAT_ASSERT( click( fe.FindAction( Fe::HF_UI_ACTION_PAUSE ) ) );
+	FEAT_ASSERT( fe.GetState() == Fe::HF_UI_FRONTEND_PAUSED );
+	const int frozenTicks = arena.ticks;
+	fe.Update( 0.25f );
+	fe.Update( 0.25f );
+	FEAT_ASSERT( arena.ticks == frozenTicks );
+
+	// PAUSED -> PLAYING resumes it
+	FEAT_ASSERT( click( fe.FindAction( Fe::HF_UI_ACTION_RESUME ) ) );
+	FEAT_ASSERT( fe.GetState() == Fe::HF_UI_FRONTEND_PLAYING );
+	const int resumeTicks = arena.ticks;
+	fe.Update( 0.1f );
+	FEAT_ASSERT( arena.ticks > resumeTicks );
+
+	// RESTART resets the arena
+	FEAT_ASSERT( click( fe.FindAction( Fe::HF_UI_ACTION_PAUSE ) ) );
+	FEAT_ASSERT( click( fe.FindAction( Fe::HF_UI_ACTION_RESTART ) ) );
+	FEAT_ASSERT( fe.GetState() == Fe::HF_UI_FRONTEND_PLAYING );
+	FEAT_ASSERT( !arena.gameOver );
+	FEAT_ASSERT( arena.hitPoints == HfArena::PLAYER_HITPOINTS );
+
+	// game over -> RESULTS
+	arena.hitPoints = 0;
+	arena.gameOver = true;
+	arena.won = true;
+	fe.Update( 0.0f );
+	FEAT_ASSERT( fe.GetState() == Fe::HF_UI_FRONTEND_RESULTS );
+	FEAT_ASSERT( fe.GetResultLabel() != HF_Ecs::ENTITY_NULL );
+	FEAT_ASSERT( strcmp( labelText( fe.GetResultLabel() ), "VICTORY" ) == 0 );
+
+	// RESULTS -> PLAYING (play again)
+	FEAT_ASSERT( click( fe.FindAction( Fe::HF_UI_ACTION_START ) ) );
+	FEAT_ASSERT( fe.GetState() == Fe::HF_UI_FRONTEND_PLAYING );
+	FEAT_ASSERT( !arena.gameOver );
+
+	// PAUSED -> TITLE
+	FEAT_ASSERT( click( fe.FindAction( Fe::HF_UI_ACTION_PAUSE ) ) );
+	FEAT_ASSERT( click( fe.FindAction( Fe::HF_UI_ACTION_MAIN_MENU ) ) );
+	FEAT_ASSERT( fe.GetState() == Fe::HF_UI_FRONTEND_TITLE );
+
+	// TITLE -> MENU, checkbox toggles and publishes ui.change
+	FEAT_ASSERT( click( fe.FindAction( Fe::HF_UI_ACTION_OPTIONS ) ) );
+	FEAT_ASSERT( fe.GetState() == Fe::HF_UI_FRONTEND_MENU );
+	FEAT_ASSERT( fe.GetMusicSlider() != HF_Ecs::ENTITY_NULL );
+	FEAT_ASSERT( fe.GetSfxSlider() != HF_Ecs::ENTITY_NULL );
+	FEAT_ASSERT( fe.GetFullscreenToggle() != HF_Ecs::ENTITY_NULL );
+	FEAT_ASSERT( !fe.GetFullscreen() );
+	FEAT_ASSERT( fe.GetMusicVolume() == 70.0f );
+	FEAT_ASSERT( click( fe.GetFullscreenToggle() ) );
+	FEAT_ASSERT( fe.GetFullscreen() );
+
+	// MENU -> TITLE
+	FEAT_ASSERT( click( fe.FindAction( Fe::HF_UI_ACTION_BACK ) ) );
+	FEAT_ASSERT( fe.GetState() == Fe::HF_UI_FRONTEND_TITLE );
+
+	// Escape does nothing on the title screen
+	const int titleLog = fe.GetActionLogCount();
+	sysEvent_t esc = {};
+	esc.evType = SE_KEY;
+	esc.evValue = K_ESCAPE;
+	esc.evValue2 = 1;
+	FEAT_ASSERT( fe.HandleSysEvent( esc ) );
+	FEAT_ASSERT( fe.GetState() == Fe::HF_UI_FRONTEND_TITLE );
+	FEAT_ASSERT( fe.GetActionLogCount() == titleLog );
+
+	// QUIT requests shutdown
+	FEAT_ASSERT( click( fe.FindAction( Fe::HF_UI_ACTION_QUIT ) ) );
+	FEAT_ASSERT( fe.QuitRequested() );
+	FEAT_ASSERT( quitEvents == 1 );
+	fe.ClearQuitRequest();
+	FEAT_ASSERT( !fe.QuitRequested() );
+
+	// LOADING -> PLAYING, then keyboard pause/resume
+	fe.SetState( Fe::HF_UI_FRONTEND_LOADING );
+	FEAT_ASSERT( fe.GetState() == Fe::HF_UI_FRONTEND_LOADING );
+	fe.BeginGame();
+	FEAT_ASSERT( fe.GetState() == Fe::HF_UI_FRONTEND_PLAYING );
+	FEAT_ASSERT( arena.ticks == 0 );
+
+	FEAT_ASSERT( fe.HandleSysEvent( esc ) );
+	FEAT_ASSERT( fe.GetState() == Fe::HF_UI_FRONTEND_PAUSED );
+	FEAT_ASSERT( fe.HandleSysEvent( esc ) );
+	FEAT_ASSERT( fe.GetState() == Fe::HF_UI_FRONTEND_PLAYING );
+
+	// Enter/Space activates the focused control
+	fe.Input().SetFocused( fe.FindAction( Fe::HF_UI_ACTION_PAUSE ) );
+	sysEvent_t enter = {};
+	enter.evType = SE_KEY;
+	enter.evValue = K_ENTER;
+	enter.evValue2 = 1;
+	FEAT_ASSERT( fe.HandleSysEvent( enter ) );
+	FEAT_ASSERT( fe.GetState() == Fe::HF_UI_FRONTEND_PAUSED );
+
+	// Absolute mouse routing lands on a control
+	fe.SetState( Fe::HF_UI_FRONTEND_TITLE );
+	FEAT_ASSERT( fe.HandleSysEvent( esc ) );
+	FEAT_ASSERT( fe.GetState() == Fe::HF_UI_FRONTEND_TITLE );
+
+	// Action log is the deterministic record of the run
+	FEAT_ASSERT( fe.GetActionLogCount() == 14 );
+	FEAT_ASSERT( fe.GetActionLog( 0 ) == Fe::HF_UI_ACTION_START );
+	FEAT_ASSERT( fe.GetActionLog( 1 ) == Fe::HF_UI_ACTION_PAUSE );
+	FEAT_ASSERT( fe.GetActionLog( 4 ) == Fe::HF_UI_ACTION_RESTART );
+	FEAT_ASSERT( fe.GetActionLog( 10 ) == Fe::HF_UI_ACTION_QUIT );
+	FEAT_ASSERT( fe.GetActionLog( 13 ) == Fe::HF_UI_ACTION_PAUSE );
+	FEAT_ASSERT( tap.count == 18 );
+	FEAT_ASSERT( tap.last == Fe::HF_UI_FRONTEND_TITLE );
+
+	fe.Shutdown();
+	FEAT_ASSERT( fe.GetState() == Fe::HF_UI_FRONTEND_BOOT );
+
+	int added = g_featFails - fc;
+	printf( "phase 10 frontend: %s\n", added ? "FAIL" : "ok" );
 }

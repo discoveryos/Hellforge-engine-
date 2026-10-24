@@ -201,20 +201,28 @@ architecture, never copy code.
 - **Validate:** `phase 9 ui widgets: ok` → `ALL PASSED`, plain and
   `--headless`, default and Jolt (4/4 matrix).
 
-### Phase 16 — Frontend: title screen, menus, HUD, pause (planned)
+### Phase 16 — Frontend: title screen, menus, HUD, pause ✅
 - **Goal:** the game is launched into a real GUI rather than straight into a
   session loop.
-- **Do:** an `hfUiFrontend` state machine (`BOOT → TITLE → MENU → LOADING →
-  PLAYING ⇄ PAUSED → RESULTS`) owning a UI tree per state; wire
-  `hfUiDrawPass` into `R_RenderView`'s GUI stage; route `Sys_*` mouse/key
-  events into `hfUiInput`; keyboard/gamepad focus navigation + `ui.submit`;
-  HUD built from the arena sim (score, health, wave) and a pause menu that
-  freezes the sim.
+- **Do:** `hflib/ui/hfUiFrontend.h` — a screen-flow state machine
+  (`BOOT → TITLE → MENU → LOADING → PLAYING ⇄ PAUSED → RESULTS`) owning a UI
+  tree per state (title, options, HUD, pause, results, loading); click actions
+  via bindings applied after input dispatch; `ui.state` events and a
+  deterministic action log; `HandleSysEvent` adapter for `SE_MOUSE` /
+  `SE_MOUSE_ABSOLUTE` / mouse buttons / Enter/Space/Escape; optional arena
+  binding that steps the sim at a fixed 60 Hz while PLAYING, mirrors
+  score/health/wave into HUD labels, and jumps to RESULTS on game over.
+  `hfUiDrawPass` gains an installed-source model and is called from
+  `RB_ExecuteBackEndCommands` once per frame (safe when nothing is installed
+  and under `--headless`), with labels rasterized to a coverage buffer and
+  blended as a single `GL_INTENSITY` texture.
 - **Godot ref:** `/home/kali/godot/scene/main/scene_tree.cpp` (main loop and
-  scene switching).
-- **Validate:** headless frontend test drives synthetic input through every
-  state transition and asserts a deterministic event log; the arena script
-  runs from the title screen to a results panel.
+  scene switching) and `Control::_gui_input` (focused-control dispatch).
+- **Validate:** `Test_UiFrontend` — clicks every screen through resolved rects:
+  title→play, HUD values, pause freezes the sim, resume/restart, results on
+  game over, options checkbox, quit, loading, Escape and Enter; asserts the
+  exact 14-action log and 18 state events. `phase 10 frontend: ok` →
+  `ALL PASSED`, plain and `--headless`, default and Jolt (4/4 matrix).
 
 ### Phase 17 — Persistence: settings, keybinds, save/load, theming (planned)
 - **Goal:** the GUI owns durable user state.

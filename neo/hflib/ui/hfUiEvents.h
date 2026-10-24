@@ -83,6 +83,13 @@ struct hfUiEventSubmit {
 	char			text[ 128 ];
 };
 
+// Published when a frontend changes screen.  Lets a host (or a test) observe
+// transitions without polling GetState().
+struct hfUiEventState {
+	int				state;
+	int				previous;
+};
+
 } // namespace HF_Ui
 
 #endif

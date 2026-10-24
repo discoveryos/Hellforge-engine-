@@ -5,6 +5,7 @@
 #include "../../framework/hfCommon_local.h"
 #include "../hfFpsOptimizer.h"
 #include "../hfStreaming.h"
+#include "../hfUiDrawPass.h"
 
 hfCVar r_drawFlickerBox( "r_drawFlickerBox", "0", CVAR_RENDERER | CVAR_BOOL, "visual test for dropping frames" );
 hfCVar stereoRender_warp( "stereoRender_warp", "0", CVAR_RENDERER | CVAR_ARCHIVE | CVAR_BOOL, "use the optical warping renderprog instead of stereoDeGhost" );
@@ -542,6 +543,11 @@ void RB_ExecuteBackEndCommands( const emptyCommand_t *cmds ) {
 	}
 
 	RB_DrawFlickerBox();
+
+	// Modern UI overlay (Phase 16): the frontend, if one is installed, draws
+	// above the frame's 3D views.  No-op when nothing is installed or when the
+	// run is headless.
+	hfUiDrawPass::DrawInstalled();
 
 	// Fix for the steam overlay not showing up while in game without Shell/Debug/Console/Menu also rendering
 	qglColorMask( 1, 1, 1, 1 );
