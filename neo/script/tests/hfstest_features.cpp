@@ -29,6 +29,8 @@
 #include "../HfScript.h"
 #include "../HfScript_Game.h"
 #include "../../hflib/console/hfConsoleServices.h"
+#include "../../hflib/ui/hfUiBuilder.h"
+#include "../../hflib/ui/hfUiInput.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -2852,6 +2854,7 @@ static void Test_BSP() {
 static void Test_Animation();
 static void Test_Game();
 static void Test_Console();
+static void Test_UiWidgets();
 
 /*
 ================================
@@ -3216,6 +3219,7 @@ int HfTest_FeaturesMain() {
 	Test_Animation();
 	Test_Game();
 	Test_Console();
+	Test_UiWidgets();
 	printf( "features logic: %s (%d failures)\n", g_featFails == 0 ? "ok" : "FAIL", g_featFails );
 	return g_featFails;
 }
@@ -3612,4 +3616,85 @@ static void Test_Console() {
 
 	int added = g_featFails - fc;
 	printf( "phase 8 console: %s\n", added ? "FAIL" : "ok" );
+}
+
+// Phase 15 - UI widgets, builder helpers, and input/event system
+static void Test_UiWidgets() {
+	using namespace HF_Ui;
+	int fc = g_featFails;
+	
+	HF_Ecs::Registry registry;
+	hfUiSystem ui;
+	ui.SetViewport( 1024.0f, 768.0f );
+	HF_Ecs::EventBus bus;
+	
+	int clickCount = 0;
+	HF_Ecs::eventHandler_t clickHandler = []( const char *name, const void *data, int size, void *user ) {
+		( void )name; ( void )data; ( void )size;
+		int *c = (int *)user;
+		(*c)++;
+	};
+	
+	// Build UI with helpers
+	HF_Ecs::Entity root = hfUiBuilder::CreateRoot( registry, 1024.0f, 768.0f );
+	HF_Ecs::Entity panel = hfUiBuilder::CreatePanel( registry, root, 50, 50, 300, 400, 0.1f, 0.1f, 0.15f, 1.0f );
+	HF_Ecs::Entity vbox = hfUiBuilder::CreateVerticalBox( registry, panel, 0, 0, 300, 400, 8.0f );
+	HF_Ecs::Entity btn = hfUiBuilder::CreateButton( registry, vbox, 0, 0, 200, 40, "PLAY" );
+	HF_Ecs::Entity slider = hfUiBuilder::CreateSlider( registry, vbox, 0, 0, 200, 30, 0.0f, 100.0f, 25.0f );
+	HF_Ecs::Entity toggle = hfUiBuilder::CreateToggle( registry, vbox, 0, 0, 200, 24, "SOUND", true );
+	HF_Ecs::Entity input = hfUiBuilder::CreateTextInput( registry, vbox, 0, 0, 200, 32, "NAME..." );
+	
+	FEAT_ASSERT( registry.Has< hfUiPanelComponent >( panel ) );
+	FEAT_ASSERT( registry.Has< hfUiButtonComponent >( btn ) );
+	FEAT_ASSERT( registry.Has< hfUiSliderComponent >( slider ) );
+	FEAT_ASSERT( registry.Has< hfUiToggleComponent >( toggle ) );
+	FEAT_ASSERT( registry.Has< hfUiTextInputComponent >( input ) );
+	
+	// Subscribe to click
+	bus.Subscribe( "ui.click", clickHandler, &clickCount );
+	
+	ui.Update( registry, 0.0f );
+	
+	// Verify layout
+	hfUiRect br = ui.GetRect( btn );
+	FEAT_ASSERT( br.w == 200.0f );
+	FEAT_ASSERT( br.h == 40.0f );
+	FEAT_ASSERT( br.x >= 50.0f ); // inside panel
+	
+	// Input system
+	hfUiInput uiInput;
+	uiInput.SetMouse( br.x + 10, br.y + 10 );
+	uiInput.SetButton( HF_UI_MOUSE_LEFT, true );
+	uiInput.Update( registry, ui, bus );
+	uiInput.SetButton( HF_UI_MOUSE_LEFT, false );
+	uiInput.Update( registry, ui, bus );
+	uiInput.EndFrame();
+	
+	FEAT_ASSERT( clickCount >= 1 );
+	
+	// Button state
+	hfUiButtonComponent *bcomp = registry.GetComponent< hfUiButtonComponent >( btn );
+	FEAT_ASSERT( bcomp != NULL );
+	
+	// Toggle state
+	hfUiToggleComponent *tcomp = registry.GetComponent< hfUiToggleComponent >( toggle );
+	FEAT_ASSERT( tcomp != NULL );
+	FEAT_ASSERT( tcomp->checked == true );
+	
+	// Slider
+	hfUiSliderComponent *scomp = registry.GetComponent< hfUiSliderComponent >( slider );
+	FEAT_ASSERT( scomp != NULL );
+	FEAT_NEAR( scomp->value, 25.0f, 0.001f );
+	
+	// Text input
+	hfUiTextInputComponent *ticomp = registry.GetComponent< hfUiTextInputComponent >( input );
+	FEAT_ASSERT( ticomp != NULL );
+	FEAT_ASSERT( strcmp( ticomp->placeholder, "NAME..." ) == 0 );
+	
+	// Event bus
+	hfUiEventClick cev = { btn, HF_UI_MOUSE_LEFT, 100, 100 };
+	bus.Publish( "ui.click", &cev, sizeof(cev) );
+	
+	int added = g_featFails - fc;
+	printf( "phase 9 ui widgets: %s\n", added ? "FAIL" : "ok" );
 }

@@ -23,11 +23,12 @@
 
 #include "../hfprecompiled.h"
 #include "../hfEcs.h"
-#include "hfUiSystem.h"
 #include "hfUiEvents.h"
 #include "hfUiWidget.h"
 
 namespace HF_Ui {
+
+class hfUiSystem;
 
 class hfUiInput {
 public:
@@ -58,7 +59,7 @@ public:
 	HF_INLINE HF_Ecs::Entity GetFocused() const { return m_focused; }
 	HF_INLINE void SetFocused( HF_Ecs::Entity e ) { m_focused = e; }
 
-	void Update( HF_Ecs::Registry &registry, hfUiSystem &ui, HF_Ecs::EventBus &bus ) {
+	void Update( HF_Ecs::Registry &registry, class hfUiSystem &ui, HF_Ecs::EventBus &bus ) {
 		HF_Ecs::Entity hit = ui.HitTest( m_mouseX, m_mouseY );
 		
 		// hover changes

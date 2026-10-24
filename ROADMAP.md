@@ -164,3 +164,65 @@ architecture, never copy code.
   determinism (identical operation sequences produce identical state; a fresh
   stub starts clean). Harness reports `phase 8 console: ok` → `ALL PASSED`,
   plain and `--headless`, default and Jolt.
+
+### Phase 14 — Modern GUI I: widgets, events, input, draw pass ✅
+- **Goal:** turn the Phase 9 UI substrate into the control-node model other
+  engines expose — Godot `Control` + signals, Unity `Canvas` + `EventSystem` —
+  without abandoning the ECS.
+- **Do:** `hflib/ui/hfUiEvents.h` — POD payloads and named channels
+  (`ui.hover`, `ui.unhover`, `ui.press`, `ui.release`, `ui.click`, `ui.focus`,
+  `ui.blur`, `ui.change`, `ui.submit`) published on `HF_Ecs::EventBus`.
+  `hflib/ui/hfUiWidget.h` — widget components: panel, button (state machine,
+  per-state colours, toggle mode), slider (min/max/step, axis, integer snap),
+  toggle/checkbox, text input (text, cursor, selection, password, focus).
+  `hflib/ui/hfUiInput.h` — pointer → intent mapping: hover transitions, press
+  capture, click-on-release-inside, drag-off cancel, click-to-focus, toggle
+  state flips. `renderer/hfUiDrawPass.{h,cpp}` — pixel-space ortho 2D pass
+  drawing panels, buttons, toggles, sliders and bitmap-font labels from the
+  sorted draw list.
+- **Godot ref:** `/home/kali/godot/scene/gui/control.cpp` and
+  `/home/kali/godot/scene/main/canvas_item.cpp` (control tree, input
+  propagation, notification-driven redraw).
+- **Validate:** UI tree resolves, hit-test drives the state machine, click
+  events reach subscribers; both engine configs link.
+
+### Phase 15 — Modern GUI II: builder helpers + harness coverage ✅
+- **Goal:** make UI construction one line per control and pin the behaviour in
+  the harness.
+- **Do:** `hflib/ui/hfUiBuilder.h` — `CreateRoot/Panel/Label/Button/Slider/
+  Toggle/TextInput/VerticalBox/HorizontalBox`, including auto-created label
+  children and `minSize` so flow containers size children correctly.
+  `Test_UiWidgets` builds a panel → column → button/slider/toggle/text-input
+  tree and asserts component attachment, resolved 200×40 button rect inside the
+  column, a real press/release producing `ui.click`, slider value, toggle
+  state, and text-input placeholder.
+- **Godot ref:** `/home/kali/godot/scene/gui/*` (ready-made controls) and
+  `BoxContainer` (flow containers).
+- **Validate:** `phase 9 ui widgets: ok` → `ALL PASSED`, plain and
+  `--headless`, default and Jolt (4/4 matrix).
+
+### Phase 16 — Frontend: title screen, menus, HUD, pause (planned)
+- **Goal:** the game is launched into a real GUI rather than straight into a
+  session loop.
+- **Do:** an `hfUiFrontend` state machine (`BOOT → TITLE → MENU → LOADING →
+  PLAYING ⇄ PAUSED → RESULTS`) owning a UI tree per state; wire
+  `hfUiDrawPass` into `R_RenderView`'s GUI stage; route `Sys_*` mouse/key
+  events into `hfUiInput`; keyboard/gamepad focus navigation + `ui.submit`;
+  HUD built from the arena sim (score, health, wave) and a pause menu that
+  freezes the sim.
+- **Godot ref:** `/home/kali/godot/scene/main/scene_tree.cpp` (main loop and
+  scene switching).
+- **Validate:** headless frontend test drives synthetic input through every
+  state transition and asserts a deterministic event log; the arena script
+  runs from the title screen to a results panel.
+
+### Phase 17 — Persistence: settings, keybinds, save/load, theming (planned)
+- **Goal:** the GUI owns durable user state.
+- **Do:** `hfUiTheme` resource (font, state colours, nine-patch borders) with
+  a text/JSON definition loaded at boot; settings screen bound to cvars;
+  keybind remapping with conflict detection; save-slot UI over the Phase 13
+  per-account console storage; resolution/quality/vsync applied live.
+- **Godot ref:** `/home/kali/godot/scene/resources/theme.cpp` and
+  `/home/kali/godot/core/input/input_map.cpp`.
+- **Validate:** settings round-trip through a save slot, keybind conflicts are
+  rejected, a theme change reskins the tree without touching widget code.

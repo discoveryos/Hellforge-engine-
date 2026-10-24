@@ -1713,3 +1713,146 @@ Jolt.
 - **The stub is not a model of a real console.** One user, no sign-in flow, no
   network, fixed gamer tag, no error paths. It models the *contract*, not the
   platform.
+
+## 23. Phase 14–15 — A modern GUI: control nodes, events, and input
+
+Phase 9 built the UI *substrate*: a `hfUiCanvasComponent` per control, anchors,
+row/column/grid flow layouts, clipping, z-ordering, hit-testing and a CPU
+bitmap-font rasterizer (`Test_Ui`). Phase 14–15 build the part a game actually
+programs against — the equivalent of Godot's `Control` node family with
+signals, or Unity's `Canvas` + `EventSystem`.
+
+### Design: widgets are ECS components
+
+Following the same choice as Phase 9, widgets are plain components attached to
+entities, not a class hierarchy. A "button" is an entity with a
+`hfUiCanvasComponent` (geometry, hierarchy, interactivity) plus a
+`hfUiButtonComponent` (visual state machine). This keeps the whole UI
+serializable, deterministic and headless-testable, and it means the layout
+solver never needs to know what kind of control it is placing.
+
+`neo/hflib/ui/hfUiWidget.h` defines the widget data:
+
+| Component | Contents |
+|---|---|
+| `hfUiPanelComponent` | background RGBA, border colour/width, corner radius |
+| `hfUiButtonComponent` | `NORMAL/HOVER/PRESSED/DISABLED` state, per-state colours, `toggle` + `active`, optional sound name |
+| `hfUiSliderComponent` | `minValue`/`maxValue`/`value`, `step`, axis, integer snap, handle size, bar/handle colours |
+| `hfUiToggleComponent` | checked/disabled, box size, box/check colours |
+| `hfUiTextInputComponent` | text, placeholder, cursor + selection, max length, password/read-only, focus, caret blink |
+
+`hfUiLabelComponent` (Phase 9) supplies text; `hfUiButtonComponent::labelEntity`
+lets a button own a label child, which is how `CreateButton` builds it.
+
+### Events: named channels on the ECS event bus
+
+Input is turned into *intents*, not raw key codes, and published through the
+existing `HF_Ecs::EventBus` (`neo/hflib/ui/hfUiEvents.h`):
+
+```
+ui.hover   { entity, x, y }        ui.focus   { entity }
+ui.unhover { entity, x, y }        ui.blur    { entity }
+ui.press   { entity, button, x, y } ui.change { entity, valueF, valueI, text }
+ui.release { entity, button, x, y } ui.submit { entity, text }
+ui.click   { entity, button, x, y }
+```
+
+The channel is a string and the payload a POD struct, so a game subscribes
+with a lambda and reads exactly the fields it needs — the moral equivalent of
+Godot's `pressed`/`value_changed` signals, without a per-widget vtable. Because
+dispatch is synchronous and ordered, replaying the same input sequence yields
+the same event sequence, which is what the harness asserts.
+
+### Input mapping: `hfUiInput`
+
+`neo/hflib/ui/hfUiInput.h` owns the interaction state machine:
+
+1. `SetMouse(x, y)` and `SetButton(button, down)` latch edge transitions
+   (`m_buttonPressed`/`m_buttonReleased`) so a frame that both presses and
+   releases is still observed.
+2. `Update()` hit-tests once via `hfUiSystem::HitTest()`, emits
+   `unhover`/`hover` on hover changes, and flips every button's visual state to
+   match hover/press.
+3. On press over an `interactive` control it records the press target and
+   moves focus (`blur` on the old, `focus` on the new).
+4. On release it emits `ui.release`; if the pointer is still over the press
+   target it also emits `ui.click`. Toggle buttons flip `active` and emit
+   `ui.change`. Releasing outside the control emits `release` only — the
+   standard "drag off to cancel" behaviour.
+5. `EndFrame()` clears the one-frame edge flags.
+
+Deliberately headless-friendly: it consumes abstract state, not a window, so
+the same code paths run in the harness and on a real platform.
+
+### Builder helpers: `hfUiBuilder`
+
+`neo/hflib/ui/hfUiBuilder.h` is the ergonomic front end — the constructor
+functions that make a UI tree readable:
+
+```cpp
+HF_Ecs::Entity root  = hfUiBuilder::CreateRoot( reg, 1024, 768 );
+HF_Ecs::Entity panel = hfUiBuilder::CreatePanel( reg, root, 50, 50, 300, 400 );
+HF_Ecs::Entity box   = hfUiBuilder::CreateVerticalBox( reg, panel, 0, 0, 300, 400 );
+HF_Ecs::Entity play  = hfUiBuilder::CreateButton( reg, box, 0, 0, 200, 40, "PLAY" );
+HF_Ecs::Entity music = hfUiBuilder::CreateSlider( reg, box, 0, 0, 200, 30, 0, 100, 25 );
+HF_Ecs::Entity sound = hfUiBuilder::CreateToggle( reg, box, 0, 0, 200, 24, "SOUND", true );
+HF_Ecs::Entity name  = hfUiBuilder::CreateTextInput( reg, box, 0, 0, 200, 32, "NAME..." );
+```
+
+Each helper attaches the canvas component, sets the parent, marks
+interactivity, and attaches the widget component. Buttons and toggles also
+create their label child. The box helpers set `HF_UI_LAYOUT_COLUMN`/
+`HF_UI_LAYOUT_ROW` plus padding and spacing.
+
+One subtlety worth documenting: inside a flow container the solver *ignores*
+child anchors and assigns rects from `minSize`. So the helpers set
+`c.minSize` as well as the anchor. That is what makes `GetRect(play)` report
+the requested 200×40 inside a column, and it is the bug the test now pins.
+
+### Draw pass: `hfUiDrawPass`
+
+`neo/renderer/hfUiDrawPass.{h,cpp}` runs after the 3D view. It switches the
+projection to a pixel-space `glOrtho` with Y down, disables depth test, sets
+premultiplied-style alpha blending (`SRC_ALPHA`/`ONE_MINUS_SRC_ALPHA`), and
+walks `hfUiSystem`'s sorted draw list:
+
+- panel background quads (visible/clipped rect),
+- button quads tinted by state when no panel is present,
+- toggle box + inner check,
+- slider bar + handle positioned by `(value-min)/(max-min)`,
+- labels rasterized through `hfBitmapFont` into an optional coverage buffer.
+
+The GPU path is compile- and state-validated in this repository; the container
+has no DISPLAY, so correctness is asserted headlessly through the draw list,
+resolved rects, coverage output and the event log rather than a screenshot.
+
+### Verification
+
+`Test_UiWidgets` builds a panel → column → button/slider/toggle/text-input tree
+with the helpers, then asserts:
+
+- every helper attached the expected component,
+- the layout solver resolved the button to exactly 200×40 inside the column
+  and placed it inside the panel,
+- a press/release over the resolved button rect produces at least one
+  `ui.click` on the bus,
+- the slider kept its initial value (25 of 0…100) and the text input its
+  placeholder,
+- toggle initial state survives construction.
+
+Harness output: `phase 9 ui widgets: ok` → `ALL PASSED`, plain and
+`--headless`, default and Jolt.
+
+### Known gaps / next
+
+- **No theme resource yet.** Colours live on each component; Phase 17 folds
+  them into a `hfUiTheme` (nine-patch, font, state colours) so a whole UI can
+  be reskinned.
+- **Text input is data-only.** Caret movement, selection, key repeat and IME
+  need the keyboard path; Phase 16 adds it with the frontend.
+- **No layout invalidation yet.** `hfUiSystem::Update` re-solves every frame;
+  a dirty flag is the obvious optimisation once UIs get large.
+- **The draw pass is not yet wired into `R_RenderView`.** It is a standalone
+  pass so the frontend (Phase 16) can call it at the right point in the frame.
+- **No navigation.** Focus is mouse-driven; gamepad/keyboard focus order and
+  `ui.submit` are Phase 16–17 work.
