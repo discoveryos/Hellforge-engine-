@@ -43,6 +43,7 @@
 #include "hfUiSystem.h"
 #include "hfUiInput.h"
 #include "hfUiTheme.h"
+#include "hfUiSaveSlots.h"
 #include "../game/hfArena.h"
 #include <stdio.h>
 
@@ -58,6 +59,7 @@ public:
 		HF_UI_FRONTEND_PLAYING,
 		HF_UI_FRONTEND_PAUSED,
 		HF_UI_FRONTEND_RESULTS,
+		HF_UI_FRONTEND_SAVES,
 		HF_UI_FRONTEND_STATE_COUNT
 	};
 
@@ -71,6 +73,10 @@ public:
 		HF_UI_ACTION_RESTART,
 		HF_UI_ACTION_MAIN_MENU,
 		HF_UI_ACTION_QUIT,
+		HF_UI_ACTION_SAVES,
+		HF_UI_ACTION_SAVE_SLOT_LOAD,
+		HF_UI_ACTION_SAVE_SLOT_WRITE,
+		HF_UI_ACTION_SAVE_SLOT_DELETE,
 		HF_UI_ACTION_COUNT
 	};
 
@@ -106,6 +112,8 @@ public:
 		m_musicVolume = 70.0f;
 		m_sfxVolume = 85.0f;
 		m_fullscreen = false;
+		m_lastSaveSlot = -1;
+		m_lastSaveKind = -1;
 	}
 
 	// Initialise once.  The event bus must outlive the frontend.  The
@@ -150,6 +158,10 @@ public:
 	HF_Ecs::Entity	GetSfxSlider() const { return m_sfxSlider; }
 	HF_Ecs::Entity	GetFullscreenToggle() const { return m_fullscreenToggle; }
 	HF_Ecs::Entity	GetResultLabel() const { return m_resultLabel; }
+	hfUiSaveSlots &	SaveSlots() { return m_saveSlots; }
+	const hfUiSaveSlots & SaveSlots() const { return m_saveSlots; }
+	int GetLastSaveSlot() const { return m_lastSaveSlot; }
+	int GetLastSaveKind() const { return m_lastSaveKind; }
 
 	float	GetMusicVolume() const { return m_musicVolume; }
 	float	GetSfxVolume() const { return m_sfxVolume; }
@@ -257,6 +269,9 @@ public:
 			case HF_UI_ACTION_OPTIONS:
 				SetState( HF_UI_FRONTEND_MENU );
 				break;
+			case HF_UI_ACTION_SAVES:
+				SetState( HF_UI_FRONTEND_SAVES );
+				break;
 			case HF_UI_ACTION_BACK:
 			case HF_UI_ACTION_MAIN_MENU:
 				SetState( HF_UI_FRONTEND_TITLE );
@@ -275,6 +290,17 @@ public:
 				m_quitRequested = true;
 				if ( m_bus != NULL ) { m_bus->Publish( "ui.quit" ); }
 				break;
+			case HF_UI_ACTION_SAVE_SLOT_DELETE:
+				if ( m_lastSaveSlot >= 0 ) {
+					m_saveSlots.Delete( m_lastSaveSlot );
+					m_saveSlots.Refresh( m_registry, m_ui );
+				}
+				break;
+			case HF_UI_ACTION_SAVE_SLOT_LOAD:
+			case HF_UI_ACTION_SAVE_SLOT_WRITE:
+				// Policy lives in the host; the handler sees the action and
+				// GetLastSaveSlot().
+				break;
 			default:
 				break;
 		}
@@ -287,6 +313,7 @@ public:
 			case HF_UI_FRONTEND_PAUSED:		PerformAction( HF_UI_ACTION_RESUME ); break;
 			case HF_UI_FRONTEND_MENU:		PerformAction( HF_UI_ACTION_BACK ); break;
 			case HF_UI_FRONTEND_RESULTS:	PerformAction( HF_UI_ACTION_MAIN_MENU ); break;
+			case HF_UI_FRONTEND_SAVES:		PerformAction( HF_UI_ACTION_BACK ); break;
 			default: break;
 		}
 	}
@@ -325,6 +352,12 @@ public:
 				if ( ev.evValue2 != 0 ) {
 					if ( key == K_ENTER || key == K_SPACE ) { ActivateFocused(); return true; }
 					if ( key == K_ESCAPE ) { Back(); return true; }
+					if ( m_bus != NULL ) {
+						if ( key == K_UPARROW || key == K_JOY_DPAD_UP ) { m_input.MoveFocus( m_registry, m_ui, *m_bus, 0, -1 ); return true; }
+						if ( key == K_DOWNARROW || key == K_JOY_DPAD_DOWN || key == K_TAB ) { m_input.MoveFocus( m_registry, m_ui, *m_bus, 0, 1 ); return true; }
+						if ( key == K_LEFTARROW || key == K_JOY_DPAD_LEFT ) { m_input.MoveFocus( m_registry, m_ui, *m_bus, -1, 0 ); return true; }
+						if ( key == K_RIGHTARROW || key == K_JOY_DPAD_RIGHT ) { m_input.MoveFocus( m_registry, m_ui, *m_bus, 1, 0 ); return true; }
+					}
 				}
 				return false;
 			}
@@ -412,6 +445,22 @@ private:
 			const int action = FindBoundAction( ev->entity );
 			if ( action != HF_UI_ACTION_NONE ) {
 				m_pendingAction = action;
+				return;
+			}
+			if ( m_state == HF_UI_FRONTEND_SAVES ) {
+				int slot = -1;
+				int kind = -1;
+				if ( m_saveSlots.Resolve( ev->entity, slot, kind ) ) {
+					m_lastSaveSlot = slot;
+					m_lastSaveKind = kind;
+					if ( kind == hfUiSaveSlots::HF_UI_SAVE_KIND_LOAD ) {
+						m_pendingAction = HF_UI_ACTION_SAVE_SLOT_LOAD;
+					} else if ( kind == hfUiSaveSlots::HF_UI_SAVE_KIND_SAVE ) {
+						m_pendingAction = HF_UI_ACTION_SAVE_SLOT_WRITE;
+					} else if ( kind == hfUiSaveSlots::HF_UI_SAVE_KIND_DELETE ) {
+						m_pendingAction = HF_UI_ACTION_SAVE_SLOT_DELETE;
+					}
+				}
 			}
 			return;
 		}
@@ -498,6 +547,9 @@ private:
 			case HF_UI_FRONTEND_RESULTS:
 				BuildResults();
 				break;
+			case HF_UI_FRONTEND_SAVES:
+				BuildSaves();
+				break;
 			default:
 				break;
 		}
@@ -514,7 +566,8 @@ private:
 
 		AddButton( root, bx, 280.0f, 300.0f, 46.0f, "PLAY", HF_UI_ACTION_START );
 		AddButton( root, bx, 340.0f, 300.0f, 46.0f, "OPTIONS", HF_UI_ACTION_OPTIONS );
-		AddButton( root, bx, 400.0f, 300.0f, 46.0f, "QUIT", HF_UI_ACTION_QUIT );
+		AddButton( root, bx, 400.0f, 300.0f, 46.0f, "SAVES", HF_UI_ACTION_SAVES );
+		AddButton( root, bx, 460.0f, 300.0f, 46.0f, "QUIT", HF_UI_ACTION_QUIT );
 
 		AddLabel( root, 0.0f, m_height - 40.0f, m_width, 20.0f,
 				  "PHASE 16 FRONTEND", 1.0f, HF_UI_TEXT_CENTER, 0.35f, 0.38f, 0.45f );
@@ -596,6 +649,19 @@ private:
 		AddButton( root, bx, 410.0f, 300.0f, 46.0f, "QUIT", HF_UI_ACTION_QUIT );
 	}
 
+	void BuildSaves() {
+		HF_Ecs::Entity root = MakeRoot( 0.06f, 0.07f, 0.10f, 1.0f );
+		AddLabel( root, 0.0f, 90.0f, m_width, 44.0f, "SAVES", 2.0f,
+				  HF_UI_TEXT_CENTER, 0.95f, 0.55f, 0.15f );
+
+		hfconsole::hfConsoleServices *svc = hfconsole::HfConsole_GetServices();
+		hfconsole::hfConsoleUserId user = svc ? svc->GetUserId( 0 ) : hfconsole::hfConsoleUserId( 0 );
+		m_saveSlots.Build( m_registry, m_ui, root, svc, user,
+						   m_width * 0.5f - 250.0f, 160.0f, 500.0f, 320.0f, 3 );
+
+		AddButton( root, ( m_width - 300.0f ) * 0.5f, 500.0f, 300.0f, 46.0f, "BACK", HF_UI_ACTION_BACK );
+	}
+
 	void SyncHud() {
 		if ( m_hud[ HF_UI_HUD_SCORE ] == HF_Ecs::ENTITY_NULL ) {
 			return;
@@ -647,6 +713,9 @@ private:
 	HF_Ecs::Entity		m_sfxSlider;
 	HF_Ecs::Entity		m_fullscreenToggle;
 	HF_Ecs::Entity		m_resultLabel;
+	hfUiSaveSlots		m_saveSlots;
+	int					m_lastSaveSlot;
+	int					m_lastSaveKind;
 
 	BoundAction			m_binds[ 32 ];
 	int					m_bindCount;

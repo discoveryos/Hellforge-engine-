@@ -238,6 +238,11 @@ architecture, never copy code.
   mirrored to/from the options screen. `hflib/ui/hfUiSaveSlots.h` — a
   LOAD/SAVE/DELETE row per slot over the same storage with an
   entity→(slot, kind) mapping, plus a storage facade.
+  `hfUiInput` adds pointer-capture slider drag (value updates while held, even
+  outside the slider rect) and directional focus traversal (`MoveFocus`).
+  `hfUiFrontend` adds a SAVES state/screen built from `hfUiSaveSlots`, routes
+  slot clicks to save-slot actions, and handles arrow/D-pad/TAB focus
+  traversal through `HandleSysEvent`.
 - **Godot ref:** `/home/kali/godot/scene/resources/theme.cpp` and
   `/home/kali/godot/core/input/input_map.cpp`.
   Engine boot now mounts the frontend in `hfCommonLocal` (init/shutdown/frame,
@@ -248,7 +253,8 @@ architecture, never copy code.
   root-vs-child panel colours and a live frontend reskin across a transition),
   keybind conflict rejection and round-trip, settings round-trip through a
   real console save slot for the signed-in user, clamping, options-screen
-  mirroring, and a save-slot panel driven by an actual click whose entity
-  resolves back to `(slot, SAVE)`. `phase 11 persistence: ok` → `ALL PASSED`,
-  plain and `--headless`, default and Jolt (4/4 matrix). Both engine configs
-  rebuilt with the frontend mounted.
+  mirroring, a save-slot panel driven by an actual click whose entity
+  resolves back to `(slot, SAVE)`, and frontend SAVES screen routing.
+  `Test_UiWidgets` also covers slider drag with pointer capture.
+  `phase 11 persistence: ok` → `ALL PASSED`, plain and `--headless`, default
+  and Jolt (4/4 matrix). Both engine configs rebuilt with the frontend mounted.

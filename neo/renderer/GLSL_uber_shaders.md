@@ -2099,11 +2099,16 @@ Harness output: `phase 11 persistence: ok` → `ALL PASSED`, plain and
   host step; no cvar bridge ships here.
 - **No keybind conflict UI.** Conflicts are rejected in the model; showing
   "already bound to move_up" in the options screen is presentation work.
-- **No profile browser.** The save-slot panel is a widget, not a screen; the
-  frontend does not yet expose a SAVES state.
+- **Save/load policy is host-owned.** The frontend now has a SAVES state/screen
+  built from `hfUiSaveSlots`; slot delete has a default refresh, but actual
+  save/load payloads are still game policy.
 - **The theme has no font or nine-patch yet.** Colours and two geometry knobs
   are what the current draw pass can express; a glyph atlas and stretchable
   borders need draw-pass work.
+- **Input coverage is partial.** Slider drag now uses pointer capture and
+  arrow/D-pad/TAB focus traversal is wired through `MoveFocus`/`HandleSysEvent`,
+  but there is no visible focus ring yet and stick/analog traversal is still
+  minimal.
 - **Menu/desktop input is now partially unified.** `hfCommonLocal` owns an
   `hfUiFrontend` + `HF_Ecs::EventBus`, initializes it at boot, installs it as
   the `hfUiDrawPass` source, and routes `Sys_*` events through

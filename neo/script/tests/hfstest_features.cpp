@@ -3694,6 +3694,38 @@ static void Test_UiWidgets() {
 	hfUiSliderComponent *scomp = registry.GetComponent< hfUiSliderComponent >( slider );
 	FEAT_ASSERT( scomp != NULL );
 	FEAT_NEAR( scomp->value, 25.0f, 0.001f );
+
+	// Slider drag with pointer capture
+	{
+		hfUiRect sr = ui.GetRect( slider );
+		FEAT_ASSERT( !sr.Empty() );
+		struct SliderChangeTap { int count; float last; };
+		SliderChangeTap tapC = { 0, -1.0f };
+		HF_Ecs::eventHandler_t onChange = []( const char *name, const void *data, int size, void *user ) {
+			(void)name;
+			if ( data == NULL || size < ( int )sizeof( hfUiEventChange ) ) { return; }
+			SliderChangeTap *t = ( SliderChangeTap * )user;
+			const hfUiEventChange *ev = ( const hfUiEventChange * )data;
+			t->count++;
+			t->last = ev->valueF;
+		};
+		bus.Subscribe( "ui.change", onChange, &tapC );
+
+		hfUiInput drag;
+		drag.SetMouse( sr.x + sr.w * 0.25f, sr.y + sr.h * 0.5f );
+		drag.SetButton( HF_UI_MOUSE_LEFT, true );
+		drag.Update( registry, ui, bus );
+		FEAT_ASSERT( scomp->value < 30.0f );
+
+		drag.SetMouse( sr.x + sr.w + 40.0f, sr.y + sr.h * 0.5f ); // outside rect, captured
+		drag.Update( registry, ui, bus );
+		FEAT_NEAR( scomp->value, 100.0f, 0.001f );
+
+		drag.SetButton( HF_UI_MOUSE_LEFT, false );
+		drag.Update( registry, ui, bus );
+		drag.EndFrame();
+		FEAT_ASSERT( tapC.count >= 1 );
+	}
 	
 	// Text input
 	hfUiTextInputComponent *ticomp = registry.GetComponent< hfUiTextInputComponent >( input );
@@ -4125,6 +4157,29 @@ static void Test_UiPersistence() {
 
 	FEAT_ASSERT( slots.Delete( 2 ) );
 	FEAT_ASSERT( slots.SlotBytes( 2 ) == 0 );
+
+	// Frontend SAVES screen is built and routes slot buttons.
+	{
+		HF_Ecs::EventBus fbus;
+		hfUiFrontend f;
+		f.Init( fbus, 1024.0f, 768.0f );
+		f.SetState( hfUiFrontend::HF_UI_FRONTEND_SAVES );
+		FEAT_ASSERT( f.GetState() == hfUiFrontend::HF_UI_FRONTEND_SAVES );
+		FEAT_ASSERT( f.SaveSlots().GetSlotCount() > 0 );
+		FEAT_ASSERT( f.SaveSlots().GetSaveButton( 0 ) != HF_Ecs::ENTITY_NULL );
+		f.Update( 0.016f );
+		const HF_Ecs::Entity sb = f.SaveSlots().GetSaveButton( 0 );
+		const hfUiRect sr = f.System().GetRect( sb );
+		f.SetMouse( sr.x + sr.w * 0.5f, sr.y + sr.h * 0.5f );
+		f.SetButton( HF_UI_MOUSE_LEFT, true );
+		f.Update( 0.016f );
+		f.SetButton( HF_UI_MOUSE_LEFT, false );
+		f.Update( 0.016f );
+		FEAT_ASSERT( f.GetLastSaveSlot() == 0 );
+		FEAT_ASSERT( f.GetLastSaveKind() == hfUiSaveSlots::HF_UI_SAVE_KIND_SAVE );
+		f.Back();
+		FEAT_ASSERT( f.GetState() == hfUiFrontend::HF_UI_FRONTEND_TITLE );
+	}
 
 	int added = g_featFails - fc;
 	printf( "phase 11 persistence: %s\n", added ? "FAIL" : "ok" );
