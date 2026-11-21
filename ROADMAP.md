@@ -224,13 +224,31 @@ architecture, never copy code.
   exact 14-action log and 18 state events. `phase 10 frontend: ok` →
   `ALL PASSED`, plain and `--headless`, default and Jolt (4/4 matrix).
 
-### Phase 17 — Persistence: settings, keybinds, save/load, theming (planned)
+### Phase 17 — Persistence: settings, keybinds, save/load, theming ✅
 - **Goal:** the GUI owns durable user state.
-- **Do:** `hfUiTheme` resource (font, state colours, nine-patch borders) with
-  a text/JSON definition loaded at boot; settings screen bound to cvars;
-  keybind remapping with conflict detection; save-slot UI over the Phase 13
-  per-account console storage; resolution/quality/vsync applied live.
+- **Do:** `hflib/ui/hfUiTheme.h` — palette + border/radius theme with a text
+  format, `Parse`/`Serialize`/`LoadFile`/`SaveFile`, and `Apply()` that
+  reskins every widget component in place (root panels take `background`,
+  nested panels `panel`, headings `accent`); the frontend's `SetTheme()`
+  rebuilds the current screen. `hflib/ui/hfUiKeybinds.h` — named actions with
+  primary/secondary keys, hard conflict rejection (`GetLastConflictAction`),
+  and text round-trip. `hflib/ui/hfUiSettings.h` — volumes, sensitivity,
+  resolution, quality, fullscreen and vsync, clamped on load, saved through
+  the Phase 13 per-account console storage (`SaveToSlot`/`LoadFromSlot`) and
+  mirrored to/from the options screen. `hflib/ui/hfUiSaveSlots.h` — a
+  LOAD/SAVE/DELETE row per slot over the same storage with an
+  entity→(slot, kind) mapping, plus a storage facade.
 - **Godot ref:** `/home/kali/godot/scene/resources/theme.cpp` and
   `/home/kali/godot/core/input/input_map.cpp`.
-- **Validate:** settings round-trip through a save slot, keybind conflicts are
-  rejected, a theme change reskins the tree without touching widget code.
+  Engine boot now mounts the frontend in `hfCommonLocal` (init/shutdown/frame,
+  `hfUiDrawPass` source install, and `HandleSysEvent` routing through
+  `MenuEvent`), so boot lands on the frontend TITLE screen and in-game ESC
+  hands off to the frontend PAUSED state.
+- **Validate:** `Test_UiPersistence` — theme parse/serialize/apply (including
+  root-vs-child panel colours and a live frontend reskin across a transition),
+  keybind conflict rejection and round-trip, settings round-trip through a
+  real console save slot for the signed-in user, clamping, options-screen
+  mirroring, and a save-slot panel driven by an actual click whose entity
+  resolves back to `(slot, SAVE)`. `phase 11 persistence: ok` → `ALL PASSED`,
+  plain and `--headless`, default and Jolt (4/4 matrix). Both engine configs
+  rebuilt with the frontend mounted.

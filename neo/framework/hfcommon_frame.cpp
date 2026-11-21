@@ -2,6 +2,7 @@
 #pragma hdrstop
 
 #include "hfCommon_local.h"
+#include "../hflib/ui/hfUiFrontend.h"
 #include "../renderer/hfImage.h"
 #include "../renderer/hfImageOpts.h"
 
@@ -346,8 +347,18 @@ void hfCommonLocal::Frame() {
 		}
 
 		// if the console or another gui is down, we don't need to hold the mouse cursor
+		bool frontendActive = false;
+		if ( uiFrontend != NULL ) {
+			const HF_Ui::hfUiFrontend::hfUiFrontendState fs = uiFrontend->GetState();
+			frontendActive = ( fs == HF_Ui::hfUiFrontend::HF_UI_FRONTEND_TITLE
+				|| fs == HF_Ui::hfUiFrontend::HF_UI_FRONTEND_MENU
+				|| fs == HF_Ui::hfUiFrontend::HF_UI_FRONTEND_LOADING
+				|| fs == HF_Ui::hfUiFrontend::HF_UI_FRONTEND_PAUSED
+				|| fs == HF_Ui::hfUiFrontend::HF_UI_FRONTEND_RESULTS );
+		}
+
 		bool chatting = false;
-		if ( console->Active() || Dialog().IsDialogActive() || session->IsSystemUIShowing() || ( game && game->InhibitControls() ) ) {
+		if ( console->Active() || Dialog().IsDialogActive() || session->IsSystemUIShowing() || ( game && game->InhibitControls() ) || frontendActive ) {
 			Sys_GrabMouseCursor( false );
 			usercmdGen->InhibitUsercmd( INHIBIT_SESSION, true );
 			chatting = true;
@@ -356,7 +367,7 @@ void hfCommonLocal::Frame() {
 			usercmdGen->InhibitUsercmd( INHIBIT_SESSION, false );
 		}
 
-		const bool pauseGame = ( !mapSpawned || ( !IsMultiplayer() && ( Dialog().IsDialogPausing() || session->IsSystemUIShowing() || ( game && game->Shell_IsActive() ) ) ) );
+		const bool pauseGame = ( !mapSpawned || ( !IsMultiplayer() && ( Dialog().IsDialogPausing() || session->IsSystemUIShowing() || ( game && game->Shell_IsActive() ) || frontendActive ) ) );
 
 		// save the screenshot and audio from the last draw if needed
 		if ( aviCaptureMode ) {

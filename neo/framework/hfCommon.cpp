@@ -82,7 +82,9 @@ hfCommonLocal::hfCommonLocal() :
 	lastPacifierDialogState( false ),
 	showShellRequested( false ),
 	currentGame( HELLFORGE ),
-	idealCurrentGame( HELLFORGE )
+	idealCurrentGame( HELLFORGE ),
+	uiEventBus( NULL ),
+	uiFrontend( NULL )
 	{
 
 	snapCurrent.localTime = -1;
@@ -1245,6 +1247,8 @@ void hfCommonLocal::Shutdown() {
 	// shut down the user interfaces
 	printf( "uiManager->Shutdown();\n" );
 	uiManager->Shutdown();
+
+	ShutdownFrontend();
 
 	// shut down the sound system
 	printf( "soundSystem->Shutdown();\n" );

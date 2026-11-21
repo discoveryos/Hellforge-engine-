@@ -2,6 +2,7 @@
 #pragma hdrstop
 
 #include "hfCommon_local.h"
+#include "../hflib/ui/hfUiFrontend.h"
 #include "../sys/hfsys_lobby_backend.h"
 
 
@@ -619,6 +620,15 @@ void hfCommonLocal::ExecuteMapChange() {
 	insideExecuteMapChange = false;
 	mapSpawned = true;
 	Sys_ClearEvents();
+
+	if ( uiFrontend != NULL ) {
+		const HF_Ui::hfUiFrontend::hfUiFrontendState fs = uiFrontend->GetState();
+		if ( fs == HF_Ui::hfUiFrontend::HF_UI_FRONTEND_TITLE
+			|| fs == HF_Ui::hfUiFrontend::HF_UI_FRONTEND_LOADING
+			|| fs == HF_Ui::hfUiFrontend::HF_UI_FRONTEND_MENU ) {
+			uiFrontend->SetState( HF_Ui::hfUiFrontend::HF_UI_FRONTEND_PLAYING );
+		}
+	}
 
 
 	int	msec = Sys_Milliseconds() - start;

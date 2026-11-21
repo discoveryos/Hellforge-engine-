@@ -63,6 +63,9 @@ enum gameLaunch_t {
 	LAUNCH_TITLE_HELLFORGE2,
 };
 
+namespace HF_Ecs { class EventBus; }
+namespace HF_Ui { class hfUiFrontend; }
+
 struct netTimes_t {
 	int localTime;
 	int serverTime;
@@ -389,6 +392,10 @@ private:
 	currentGame_t		currentGame;
 	currentGame_t		idealCurrentGame;		// Defer game switching so that bad things don't happen in the middle of the frame.
 
+	// Phase 16/17 engine frontend (title/menu/HUD/options).
+	HF_Ecs::EventBus *	uiEventBus;
+	HF_Ui::hfUiFrontend * uiFrontend;
+
 private:
 	void	InitCommands();
 	void	InitSIMD();
@@ -411,6 +418,10 @@ private:
 	
 	void	StartMenu( bool playIntro = false );
 	void	GuiFrameEvents();
+
+	void	InitFrontend();
+	void	ShutdownFrontend();
+	void	FrontendFrame();
 
 	void	BeginAVICapture( const char *name );
 	void	EndAVICapture();

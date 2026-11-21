@@ -1990,3 +1990,124 @@ default and Jolt.
 - **Text is one colour.** The coverage texture is blended white; per-label
   colours need a glyph atlas or a per-label batch.
 - **No fade/transition animation.** Screens swap instantly.
+
+## 25. Phase 17 — Persistence: theme, keybinds, settings, save slots
+
+Phase 16 gave the frontend screens. Phase 17 gives it durable state: what a
+player changes on the options screen survives a restart, follows the signed-in
+account, and can be reskinned without touching a single widget.
+
+### `hfUiTheme` — one resource, applied in place
+
+`neo/hflib/ui/hfUiTheme.h` is the theme resource: a palette (background,
+panel, border, text, dim text, accent, button states, slider, toggle) plus
+`panel_border_width` and `corner_radius`. It serializes to a line-oriented
+text file:
+
+```
+panel              = 0.12,0.13,0.18,1
+button_normal      = 0.2,0.2,0.25,1
+panel_border_width = 1
+corner_radius      = 4
+```
+
+`Parse` ignores unknown keys and comments, so an old file still loads after a
+theme format grows. `Apply(registry)` walks every widget component and rewrites
+it in place: panels, buttons (all four states), sliders, toggles and labels.
+Root panels (`parent == ENTITY_NULL`) take `background` while nested panels
+take `panel`, which is what lets a screen backdrop differ from a dialog.
+Labels at scale ≥ 2 are treated as headings and take `accent`, so the visual
+hierarchy survives a reskin.
+
+The frontend stores a theme and calls `SetTheme()`, which rebuilds the current
+screen; the rebuild itself is what makes the change immediate. No widget knows
+themes exist.
+
+### `hfUiKeybinds` — named actions with hard conflict rejection
+
+`neo/hflib/ui/hfUiKeybinds.h` maps action names to a primary and a secondary
+key (`keyNum_t`). `Bind()` checks *both* slots of every other action and
+refuses to steal a key; the rejected binding leaves the old one intact and
+reports the owning action through `GetLastConflictAction()`. Defaults cover
+movement, fire, pause and confirm. The format is `action = primary,secondary`,
+which gives the same diffable, round-trippable properties as the theme.
+
+`Parse()` deliberately trusts the file rather than rejecting duplicates; the
+next `Bind()` is the repair path, and loading never fails on data it can read.
+
+### `hfUiSettings` — per-account, not per-machine
+
+`neo/hflib/ui/hfUiSettings.h` holds volumes, mouse sensitivity, resolution,
+quality, fullscreen and vsync, with the same text format and clamping on load
+(so a hand-edited `music_volume = 999` becomes 100 instead of breaking the
+mixer).
+
+Storage goes through the Phase 13 console seam:
+
+```cpp
+settings.SaveToSlot( HfConsole_GetServices(), user, "settings" );
+settings.LoadFromSlot( HfConsole_GetServices(), user, "settings" );
+```
+
+That is the point of the console storage layer: on a console the settings
+belong to the signed-in user, and on a dev box the offline stub provides the
+same behaviour. `WriteTo(frontend)` / `ReadFrom(frontend)` mirror the struct
+onto the options screen, so loading a profile updates the sliders and checkbox
+without the screen knowing where the values came from.
+
+### `hfUiSaveSlots` — the save UI over that same storage
+
+`neo/hflib/ui/hfUiSaveSlots.h` builds one row per slot (label plus
+LOAD / SAVE / DELETE). It is a facade over `WriteSlot`/`ReadSlot`/`SlotSize`/
+`DeleteSlot` and a mapping from entity to `(slot, kind)`:
+
+```cpp
+int slot, kind;
+if ( slots.Resolve( clickedEntity, slot, kind ) ) { ... }
+```
+
+Deliberately not an event source: save/load *policy* (what a save contains,
+when it is allowed) belongs to the game. The panel only renders and routes.
+Slot keys are `save1`, `save2`, … so they stay stable across runs.
+
+### Verification
+
+`Test_UiPersistence` covers all four pieces:
+
+- theme text round-trip, defaults preserved for keys not present, and
+  `Apply()` recolouring panels/buttons/sliders/toggles in place (root vs child
+  panel colours are distinguished);
+- a live frontend reskin: `SetTheme()` recolours the title screen button and
+  survives a transition to the options screen;
+- keybind conflicts: binding `move_down` to `W` is rejected and `move_up` is
+  reported, the original binding is unchanged, a secondary-slot conflict is
+  caught too, and the map round-trips through text;
+- settings: write through the console stub for the actual signed-in user,
+  read back every field, unknown slot rejected, out-of-range values clamped,
+  and the options screen mirrors both directions;
+- save-slot panel: build three rows, resolve a button to `(slot 1, SAVE)`,
+  exercise the storage facade, then click the slot-0 SAVE button through
+  `hfUiInput` and resolve the clicked entity back to `(slot 0, SAVE)`.
+
+Harness output: `phase 11 persistence: ok` → `ALL PASSED`, plain and
+`--headless`, default and Jolt.
+
+### Known gaps
+
+- **No live application to the engine.** Settings store and mirror values,
+  but applying resolution/quality/vsync to the renderer and the mixer is a
+  host step; no cvar bridge ships here.
+- **No keybind conflict UI.** Conflicts are rejected in the model; showing
+  "already bound to move_up" in the options screen is presentation work.
+- **No profile browser.** The save-slot panel is a widget, not a screen; the
+  frontend does not yet expose a SAVES state.
+- **The theme has no font or nine-patch yet.** Colours and two geometry knobs
+  are what the current draw pass can express; a glyph atlas and stretchable
+  borders need draw-pass work.
+- **Menu/desktop input is now partially unified.** `hfCommonLocal` owns an
+  `hfUiFrontend` + `HF_Ecs::EventBus`, initializes it at boot, installs it as
+  the `hfUiDrawPass` source, and routes `Sys_*` events through
+  `HandleSysEvent` when the frontend is in a menu/pause/results state. Boot now
+  lands on the frontend TITLE screen; in-game ESC hands off to the frontend
+  PAUSED state. Full game-start wiring (START action -> real map load) and
+  retirement of the legacy shell remain follow-up work.

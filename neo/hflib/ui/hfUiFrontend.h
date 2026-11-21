@@ -42,6 +42,7 @@
 #include "hfUiBuilder.h"
 #include "hfUiSystem.h"
 #include "hfUiInput.h"
+#include "hfUiTheme.h"
 #include "../game/hfArena.h"
 #include <stdio.h>
 
@@ -154,6 +155,31 @@ public:
 	float	GetSfxVolume() const { return m_sfxVolume; }
 	bool	GetFullscreen() const { return m_fullscreen; }
 
+	void SetMusicVolume( float v ) {
+		m_musicVolume = v;
+		if ( m_state == HF_UI_FRONTEND_MENU ) { SetState( HF_UI_FRONTEND_MENU ); }
+	}
+	void SetSfxVolume( float v ) {
+		m_sfxVolume = v;
+		if ( m_state == HF_UI_FRONTEND_MENU ) { SetState( HF_UI_FRONTEND_MENU ); }
+	}
+	void SetFullscreen( bool on ) {
+		m_fullscreen = on;
+		if ( m_state == HF_UI_FRONTEND_MENU ) { SetState( HF_UI_FRONTEND_MENU ); }
+	}
+
+	// --- theme ------------------------------------------------------------
+
+	const hfUiTheme &	GetTheme() const { return m_theme; }
+
+	// Reskin every screen.  Rebuilding the current screen is what makes a
+	// theme change take effect immediately without any widget code knowing
+	// that themes exist.
+	void SetTheme( const hfUiTheme &theme ) {
+		m_theme = theme;
+		if ( m_state != HF_UI_FRONTEND_BOOT ) { SetState( m_state ); }
+	}
+
 	void SetActionHandler( hfUiActionHandler handler, void *user ) {
 		m_actionHandler = handler;
 		m_actionUser = user;
@@ -197,6 +223,7 @@ public:
 		for ( int i = 0; i < HF_UI_HUD_COUNT; i++ ) { m_hud[ i ] = HF_Ecs::ENTITY_NULL; }
 
 		BuildState( state );
+		m_theme.Apply( m_registry );
 		SyncHud();
 		m_ui.Update( m_registry, 0.0f );
 
@@ -611,6 +638,8 @@ private:
 	float				m_musicVolume;
 	float				m_sfxVolume;
 	bool				m_fullscreen;
+
+	hfUiTheme			m_theme;
 
 	HF_Ecs::Entity		m_root;
 	HF_Ecs::Entity		m_hud[ HF_UI_HUD_COUNT ];

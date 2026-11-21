@@ -32,6 +32,10 @@
 #include "../../hflib/ui/hfUiBuilder.h"
 #include "../../hflib/ui/hfUiInput.h"
 #include "../../hflib/ui/hfUiFrontend.h"
+#include "../../hflib/ui/hfUiTheme.h"
+#include "../../hflib/ui/hfUiKeybinds.h"
+#include "../../hflib/ui/hfUiSettings.h"
+#include "../../hflib/ui/hfUiSaveSlots.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -2857,6 +2861,7 @@ static void Test_Game();
 static void Test_Console();
 static void Test_UiWidgets();
 static void Test_UiFrontend();
+static void Test_UiPersistence();
 
 /*
 ================================
@@ -3223,6 +3228,7 @@ int HfTest_FeaturesMain() {
 	Test_Console();
 	Test_UiWidgets();
 	Test_UiFrontend();
+	Test_UiPersistence();
 	printf( "features logic: %s (%d failures)\n", g_featFails == 0 ? "ok" : "FAIL", g_featFails );
 	return g_featFails;
 }
@@ -3892,4 +3898,234 @@ static void Test_UiFrontend() {
 
 	int added = g_featFails - fc;
 	printf( "phase 10 frontend: %s\n", added ? "FAIL" : "ok" );
+}
+
+// Phase 17 - theme resource, keybinds, settings persistence, save-slot panel
+static void Test_UiPersistence() {
+	using namespace HF_Ui;
+	using namespace hfconsole;
+	int fc = g_featFails;
+
+	// (a) theme text format round-trips
+	hfUiTheme theme;
+	theme.SetDefaults();
+	FEAT_ASSERT( theme.Parse(
+		"# user theme\n"
+		"accent = 1,0,0,1\n"
+		"button_normal = 0.1,0.2,0.3,1\n"
+		"panel_border_width = 2\n"
+		"corner_radius = 6\n"
+		"unknown_key = 5\n" ) );
+	FEAT_NEAR( theme.accent.r, 1.0f, 1e-5f );
+	FEAT_NEAR( theme.accent.g, 0.0f, 1e-5f );
+	FEAT_NEAR( theme.buttonNormal.b, 0.3f, 1e-5f );
+	FEAT_NEAR( theme.panelBorderWidth, 2.0f, 1e-5f );
+	FEAT_NEAR( theme.cornerRadius, 6.0f, 1e-5f );
+	FEAT_NEAR( theme.text.r, 0.95f, 1e-5f );		// untouched key keeps its default
+
+	char themeText[ 4096 ];
+	FEAT_ASSERT( theme.Serialize( themeText, sizeof( themeText ) ) > 0 );
+	hfUiTheme themeCopy;
+	themeCopy.SetDefaults();
+	FEAT_ASSERT( themeCopy.Parse( themeText ) );
+	FEAT_NEAR( themeCopy.accent.r, 1.0f, 1e-5f );
+	FEAT_NEAR( themeCopy.buttonNormal.g, 0.2f, 1e-5f );
+	FEAT_NEAR( themeCopy.cornerRadius, 6.0f, 1e-5f );
+
+	// (b) Apply() reskins widgets in place
+	HF_Ecs::Registry reg;
+	hfUiSystem ui;
+	ui.SetViewport( 1024.0f, 768.0f );
+
+	HF_Ecs::Entity root = hfUiBuilder::CreatePanel( reg, HF_Ecs::ENTITY_NULL, 0.0f, 0.0f, 1024.0f, 768.0f,
+													0.0f, 0.0f, 0.0f, 1.0f );
+	HF_Ecs::Entity panel = hfUiBuilder::CreatePanel( reg, root, 10.0f, 10.0f, 220.0f, 100.0f );
+	HF_Ecs::Entity button = hfUiBuilder::CreateButton( reg, root, 10.0f, 130.0f, 220.0f, 40.0f, "OK" );
+	HF_Ecs::Entity slider = hfUiBuilder::CreateSlider( reg, root, 10.0f, 180.0f, 220.0f, 24.0f );
+	HF_Ecs::Entity toggle = hfUiBuilder::CreateToggle( reg, root, 10.0f, 210.0f, 220.0f, 24.0f, "ON" );
+
+	hfUiTheme skin;
+	skin.SetDefaults();
+	skin.buttonNormal = hfUiThemeColor( 0.9f, 0.1f, 0.1f, 1.0f );
+	skin.buttonHover = hfUiThemeColor( 1.0f, 0.2f, 0.2f, 1.0f );
+	skin.background = hfUiThemeColor( 0.02f, 0.02f, 0.02f, 1.0f );
+	skin.panel = hfUiThemeColor( 0.20f, 0.21f, 0.22f, 1.0f );
+	skin.sliderHandle = hfUiThemeColor( 0.0f, 1.0f, 0.0f, 1.0f );
+	skin.toggleCheck = hfUiThemeColor( 0.0f, 0.0f, 1.0f, 1.0f );
+
+	FEAT_ASSERT( skin.Apply( reg ) >= 6 );
+
+	hfUiButtonComponent *btn = reg.GetComponent< hfUiButtonComponent >( button );
+	FEAT_ASSERT( btn != NULL );
+	FEAT_NEAR( btn->normalR, 0.9f, 1e-5f );
+	FEAT_NEAR( btn->hoverG, 0.2f, 1e-5f );
+
+	hfUiPanelComponent *rootPanel = reg.GetComponent< hfUiPanelComponent >( root );
+	hfUiPanelComponent *childPanel = reg.GetComponent< hfUiPanelComponent >( panel );
+	FEAT_ASSERT( rootPanel != NULL && childPanel != NULL );
+	FEAT_NEAR( rootPanel->r, 0.02f, 1e-5f );		// root takes the background
+	FEAT_NEAR( childPanel->r, 0.20f, 1e-5f );	// dialog takes the panel color
+
+	hfUiSliderComponent *sld = reg.GetComponent< hfUiSliderComponent >( slider );
+	hfUiToggleComponent *tog = reg.GetComponent< hfUiToggleComponent >( toggle );
+	FEAT_ASSERT( sld != NULL && tog != NULL );
+	FEAT_NEAR( sld->handleG, 1.0f, 1e-5f );
+	FEAT_NEAR( tog->checkB, 1.0f, 1e-5f );
+
+	// (c) a live frontend reskin needs no widget code
+	HF_Ecs::EventBus bus;
+	hfUiFrontend fe;
+	fe.Init( bus, 1024.0f, 768.0f );
+	hfUiTheme red;
+	red.SetDefaults();
+	red.buttonNormal = hfUiThemeColor( 1.0f, 0.0f, 0.0f, 1.0f );
+	fe.SetTheme( red );
+	HF_Ecs::Entity play = fe.FindAction( hfUiFrontend::HF_UI_ACTION_START );
+	FEAT_ASSERT( play != HF_Ecs::ENTITY_NULL );
+	hfUiButtonComponent *playBtn = fe.RegistryPtr()->GetComponent< hfUiButtonComponent >( play );
+	FEAT_ASSERT( playBtn != NULL );
+	FEAT_NEAR( playBtn->normalR, 1.0f, 1e-5f );
+	FEAT_NEAR( playBtn->normalG, 0.0f, 1e-5f );
+	fe.SetState( hfUiFrontend::HF_UI_FRONTEND_MENU );
+	HF_Ecs::Entity back = fe.FindAction( hfUiFrontend::HF_UI_ACTION_BACK );
+	FEAT_ASSERT( back != HF_Ecs::ENTITY_NULL );
+	FEAT_NEAR( fe.RegistryPtr()->GetComponent< hfUiButtonComponent >( back )->normalR, 1.0f, 1e-5f );
+
+	// (d) keybinds: conflict detection and round trip
+	hfUiKeybinds keys;
+	keys.SetDefaults();
+	FEAT_ASSERT( keys.Count() >= 7 );
+	FEAT_ASSERT( keys.Find( "move_up" ) >= 0 );
+	FEAT_ASSERT( keys.ActionForKey( K_W ) != NULL );
+	FEAT_ASSERT( strcmp( keys.ActionForKey( K_W ), "move_up" ) == 0 );
+
+	FEAT_ASSERT( !keys.Bind( "move_down", K_W ) );
+	FEAT_ASSERT( strcmp( keys.GetLastConflictAction(), "move_up" ) == 0 );
+	FEAT_ASSERT( keys.GetLastConflict() == keys.Find( "move_up" ) );
+	FEAT_ASSERT( keys.Primary( keys.Find( "move_down" ) ) == K_S );	// unchanged
+
+	FEAT_ASSERT( keys.Bind( "jump", K_Q ) );
+	FEAT_ASSERT( strcmp( keys.ActionForKey( K_Q ), "jump" ) == 0 );
+	FEAT_ASSERT( keys.Bind( "fire", K_F, 1 ) );
+	FEAT_ASSERT( !keys.Bind( "move_up", K_F ) );		// secondary slot is checked too
+	FEAT_ASSERT( keys.Unbind( "jump" ) );
+	FEAT_ASSERT( keys.ActionForKey( K_Q ) == NULL );
+
+	char keyText[ 1024 ];
+	FEAT_ASSERT( keys.Serialize( keyText, sizeof( keyText ) ) > 0 );
+	hfUiKeybinds keysCopy;
+	FEAT_ASSERT( keysCopy.Parse( keyText ) );
+	FEAT_ASSERT( keysCopy.Count() == keys.Count() );
+	FEAT_ASSERT( strcmp( keysCopy.ActionForKey( K_F ), "fire" ) == 0 );
+	FEAT_ASSERT( strcmp( keysCopy.ActionForKey( K_W ), "move_up" ) == 0 );
+
+	// (e) settings survive a round trip through console per-user storage
+	hfConsoleServices *services = HfConsole_GetServices();
+	FEAT_ASSERT( services != NULL );
+	hfConsoleUserId user = services->GetUserId( 0 );	// signed-in local user
+	services->DeleteSlot( user, "settings" );
+
+	hfUiSettings settings;
+	settings.SetDefaults();
+	settings.musicVolume = 33.0f;
+	settings.sfxVolume = 44.0f;
+	settings.mouseSensitivity = 2.5f;
+	settings.width = 1600;
+	settings.height = 900;
+	settings.quality = 3;
+	settings.fullscreen = true;
+	settings.vsync = false;
+	FEAT_ASSERT( settings.SaveToSlot( services, user ) );
+	FEAT_ASSERT( services->SlotSize( user, "settings" ) > 0 );
+
+	hfUiSettings loaded;
+	loaded.SetDefaults();
+	FEAT_ASSERT( loaded.LoadFromSlot( services, user ) );
+	FEAT_NEAR( loaded.musicVolume, 33.0f, 1e-4f );
+	FEAT_NEAR( loaded.sfxVolume, 44.0f, 1e-4f );
+	FEAT_NEAR( loaded.mouseSensitivity, 2.5f, 1e-4f );
+	FEAT_ASSERT( loaded.width == 1600 && loaded.height == 900 && loaded.quality == 3 );
+	FEAT_ASSERT( loaded.fullscreen );
+	FEAT_ASSERT( !loaded.vsync );
+
+	hfUiSettings missing;
+	FEAT_ASSERT( !missing.LoadFromSlot( services, user, "no-such-slot" ) );
+
+	hfUiSettings clamped;
+	clamped.Parse( "music_volume = 999\nsfx_volume = -5\nquality = 9\nwidth = 1\n" );
+	FEAT_NEAR( clamped.musicVolume, 100.0f, 1e-4f );
+	FEAT_NEAR( clamped.sfxVolume, 0.0f, 1e-4f );
+	FEAT_ASSERT( clamped.quality == 3 );
+	FEAT_ASSERT( clamped.width == 320 );
+
+	// options screen <-> settings mirror
+	loaded.WriteTo( fe );
+	FEAT_NEAR( fe.GetMusicVolume(), 33.0f, 1e-4f );
+	FEAT_NEAR( fe.GetSfxVolume(), 44.0f, 1e-4f );
+	FEAT_ASSERT( fe.GetFullscreen() );
+	fe.SetMusicVolume( 12.0f );
+	fe.SetFullscreen( false );
+	hfUiSettings captured;
+	captured.ReadFrom( fe );
+	FEAT_NEAR( captured.musicVolume, 12.0f, 1e-4f );
+	FEAT_ASSERT( !captured.fullscreen );
+
+	// (f) save-slot panel over the same storage, driven by a real click
+	HF_Ecs::Registry sreg;
+	hfUiSystem sui;
+	sui.SetViewport( 1024.0f, 768.0f );
+
+	hfUiSaveSlots slots;
+	HF_Ecs::Entity slotRoot = slots.Build( sreg, sui, HF_Ecs::ENTITY_NULL, services, user,
+										   100.0f, 100.0f, 500.0f, 200.0f, 3 );
+	FEAT_ASSERT( slotRoot != HF_Ecs::ENTITY_NULL );
+	FEAT_ASSERT( slots.GetSlotCount() == 3 );
+	FEAT_ASSERT( slots.GetSaveButton( 1 ) != HF_Ecs::ENTITY_NULL );
+
+	int slot = -1;
+	int kind = -1;
+	FEAT_ASSERT( slots.Resolve( slots.GetSaveButton( 1 ), slot, kind ) );
+	FEAT_ASSERT( slot == 1 );
+	FEAT_ASSERT( kind == hfUiSaveSlots::HF_UI_SAVE_KIND_SAVE );
+	FEAT_ASSERT( !slots.Resolve( slotRoot, slot, kind ) );
+
+	FEAT_ASSERT( slots.Save( 2, "hello", 5 ) );
+	FEAT_ASSERT( slots.SlotBytes( 2 ) == 5 );
+	char slotData[ 16 ];
+	FEAT_ASSERT( slots.Load( 2, slotData, sizeof( slotData ) ) == 5 );
+	FEAT_ASSERT( memcmp( slotData, "hello", 5 ) == 0 );
+
+	struct ClickTap { HF_Ecs::Entity entity; int count; };
+	ClickTap tap = { HF_Ecs::ENTITY_NULL, 0 };
+	HF_Ecs::eventHandler_t onClick = []( const char *name, const void *data, int size, void *user ) {
+		( void )name;
+		if ( data == NULL || size < ( int )sizeof( hfUiEventClick ) ) { return; }
+		ClickTap *t = ( ClickTap * )user;
+		t->entity = ( ( const hfUiEventClick * )data )->entity;
+		t->count++;
+	};
+	HF_Ecs::EventBus sbus;
+	sbus.Subscribe( "ui.click", onClick, &tap );
+
+	hfUiInput sin;
+	const hfUiRect saveRect = sui.GetRect( slots.GetSaveButton( 0 ) );
+	FEAT_ASSERT( !saveRect.Empty() );
+	sin.SetMouse( saveRect.x + saveRect.w * 0.5f, saveRect.y + saveRect.h * 0.5f );
+	sin.SetButton( HF_UI_MOUSE_LEFT, true );
+	sin.Update( sreg, sui, sbus );
+	sin.SetButton( HF_UI_MOUSE_LEFT, false );
+	sin.Update( sreg, sui, sbus );
+	sin.EndFrame();
+	FEAT_ASSERT( tap.count >= 1 );
+	int clickedSlot = -1;
+	int clickedKind = -1;
+	FEAT_ASSERT( slots.Resolve( tap.entity, clickedSlot, clickedKind ) );
+	FEAT_ASSERT( clickedSlot == 0 );
+	FEAT_ASSERT( clickedKind == hfUiSaveSlots::HF_UI_SAVE_KIND_SAVE );
+
+	FEAT_ASSERT( slots.Delete( 2 ) );
+	FEAT_ASSERT( slots.SlotBytes( 2 ) == 0 );
+
+	int added = g_featFails - fc;
+	printf( "phase 11 persistence: %s\n", added ? "FAIL" : "ok" );
 }

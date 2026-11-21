@@ -335,7 +335,11 @@ public:
 #include "ui/hfUiWidget.h"
 #include "ui/hfUiInput.h"
 #include "ui/hfUiBuilder.h"
+#include "ui/hfUiTheme.h"
+#include "ui/hfUiKeybinds.h"
 #include "ui/hfUiFrontend.h"
+#include "ui/hfUiSettings.h"
+#include "ui/hfUiSaveSlots.h"
 
 // Phase 10 — networking (ENet-class transport, replication, lag compensation)
 #include "net/hfNetComponent.h"

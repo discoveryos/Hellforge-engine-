@@ -2,6 +2,8 @@
 #pragma hdrstop
 
 #include "hfCommon_local.h"
+#include "../hflib/ui/hfUiFrontend.h"
+#include "../renderer/hfUiDrawPass.h"
 
 /*
 ==============
@@ -89,19 +91,104 @@ void hfCommonLocal::OnStartHosting( hfMatchParameters & parms ) {
 	parms.numSlots = session->GetTitleStorageInt("MAX_PLAYERS_ALLOWED", 4 );
 }
 
+static void HF_FrontendActionHandler( int action, void * /*user*/ ) {
+	if ( action == HF_Ui::hfUiFrontend::HF_UI_ACTION_QUIT ) {
+		cmdSystem->BufferCommandText( CMD_EXEC_APPEND, "quit\n" );
+	}
+}
+
+/*
+==============
+hfCommonLocal::InitFrontend
+==============
+*/
+void hfCommonLocal::InitFrontend() {
+	if ( uiFrontend != NULL ) {
+		return;
+	}
+	uiEventBus = new HF_Ecs::EventBus();
+	uiFrontend = new HF_Ui::hfUiFrontend();
+
+	float w = 1280.0f;
+	float h = 720.0f;
+	if ( renderSystem != NULL ) {
+		w = ( float )renderSystem->GetWidth();
+		h = ( float )renderSystem->GetHeight();
+	}
+	uiFrontend->Init( *uiEventBus, w, h );
+	uiFrontend->SetActionHandler( HF_FrontendActionHandler, NULL );
+	hfUiDrawPass::SetSource( uiFrontend->RegistryPtr(), uiFrontend->SystemPtr() );
+}
+
+/*
+==============
+hfCommonLocal::ShutdownFrontend
+==============
+*/
+void hfCommonLocal::ShutdownFrontend() {
+	if ( uiFrontend != NULL ) {
+		uiFrontend->Shutdown();
+		delete uiFrontend;
+		uiFrontend = NULL;
+	}
+	if ( uiEventBus != NULL ) {
+		delete uiEventBus;
+		uiEventBus = NULL;
+	}
+	hfUiDrawPass::SetSource( NULL, NULL );
+}
+
+/*
+==============
+hfCommonLocal::FrontendFrame
+==============
+*/
+void hfCommonLocal::FrontendFrame() {
+	if ( uiFrontend == NULL ) {
+		return;
+	}
+	// Keep viewport in sync with the renderer.
+	if ( renderSystem != NULL ) {
+		const float w = ( float )renderSystem->GetWidth();
+		const float h = ( float )renderSystem->GetHeight();
+		if ( w > 0.0f && h > 0.0f ) {
+			uiFrontend->System().SetViewport( w, h );
+		}
+	}
+	// Advance the frontend (fixed-step sim happens inside when PLAYING).
+	uiFrontend->Update( 1.0f / 60.0f );
+
+	if ( uiFrontend->QuitRequested() ) {
+		uiFrontend->ClearQuitRequest();
+		cmdSystem->BufferCommandText( CMD_EXEC_APPEND, "quit\n" );
+	}
+}
+
 /*
 ==============
 hfCommonLocal::StartMainMenu
 ==============
 */
 void hfCommonLocal::StartMenu( bool playIntro ) {
-	if ( game && game->Shell_IsActive() ) {
-		return;
-	}
-
 	if ( readDemo ) {
 		// if we're playing a demo, esc kills it
 		UnloadMap();
+	}
+
+	InitFrontend();
+	if ( uiFrontend != NULL ) {
+		hfUiDrawPass::SetSource( uiFrontend->RegistryPtr(), uiFrontend->SystemPtr() );
+		if ( !mapSpawned ) {
+			uiFrontend->SetState( HF_Ui::hfUiFrontend::HF_UI_FRONTEND_TITLE );
+		} else if ( uiFrontend->GetState() != HF_Ui::hfUiFrontend::HF_UI_FRONTEND_PAUSED ) {
+			uiFrontend->SetState( HF_Ui::hfUiFrontend::HF_UI_FRONTEND_PAUSED );
+		}
+		console->Close();
+		return;
+	}
+
+	if ( game && game->Shell_IsActive() ) {
+		return;
 	}
 
 	if ( game ) {
@@ -110,7 +197,6 @@ void hfCommonLocal::StartMenu( bool playIntro ) {
 	}
 
 	console->Close();
-
 }
 
 /*
@@ -119,6 +205,17 @@ hfCommonLocal::ExitMenu
 ===============
 */
 void hfCommonLocal::ExitMenu() {
+	if ( uiFrontend != NULL ) {
+		const HF_Ui::hfUiFrontend::hfUiFrontendState s = uiFrontend->GetState();
+		if ( s == HF_Ui::hfUiFrontend::HF_UI_FRONTEND_PAUSED ) {
+			uiFrontend->SetState( HF_Ui::hfUiFrontend::HF_UI_FRONTEND_PLAYING );
+			return;
+		}
+		if ( s == HF_Ui::hfUiFrontend::HF_UI_FRONTEND_MENU ) {
+			uiFrontend->SetState( HF_Ui::hfUiFrontend::HF_UI_FRONTEND_TITLE );
+			return;
+		}
+	}
 	if ( game ) {
 		game->Shell_Show( false );
 	}
@@ -135,6 +232,28 @@ bool hfCommonLocal::MenuEvent( const sysEvent_t * event ) {
 
 	if ( session->GetSignInManager().ProcessInputEvent( event ) ) {
 		return true;
+	}
+
+	if ( uiFrontend != NULL ) {
+		const HF_Ui::hfUiFrontend::hfUiFrontendState s = uiFrontend->GetState();
+		const bool frontendActive = ( s == HF_Ui::hfUiFrontend::HF_UI_FRONTEND_TITLE
+			|| s == HF_Ui::hfUiFrontend::HF_UI_FRONTEND_MENU
+			|| s == HF_Ui::hfUiFrontend::HF_UI_FRONTEND_LOADING
+			|| s == HF_Ui::hfUiFrontend::HF_UI_FRONTEND_PAUSED
+			|| s == HF_Ui::hfUiFrontend::HF_UI_FRONTEND_RESULTS );
+		if ( frontendActive ) {
+			if ( uiFrontend->HandleSysEvent( *event ) ) {
+				return true;
+			}
+		} else if ( s == HF_Ui::hfUiFrontend::HF_UI_FRONTEND_PLAYING ) {
+			// In-game: only let frontend handle pause/back keys.
+			if ( event->evType == SE_KEY && event->evValue2 == 1
+				&& ( event->evValue == K_ESCAPE || event->evValue == K_JOY9 ) ) {
+				if ( uiFrontend->HandleSysEvent( *event ) ) {
+					return true;
+				}
+			}
+		}
 	}
 
 	if ( game && game->Shell_IsActive() ) {
@@ -157,5 +276,6 @@ void hfCommonLocal::GuiFrameEvents() {
 	if ( game ) {
 		game->Shell_SyncWithSession();
 	}
+	FrontendFrame();
 }
 
