@@ -44,6 +44,7 @@
 #include "hfUiInput.h"
 #include "hfUiTheme.h"
 #include "hfUiSaveSlots.h"
+#include "hfUiKeybinds.h"
 #include "../game/hfArena.h"
 #include <stdio.h>
 
@@ -114,6 +115,10 @@ public:
 		m_fullscreen = false;
 		m_lastSaveSlot = -1;
 		m_lastSaveKind = -1;
+		m_pendingBindRow = -1;
+		m_keybindRowCount = 0;
+		m_keybindStatus = HF_Ecs::ENTITY_NULL;
+		m_keybinds.SetDefaults();
 	}
 
 	// Initialise once.  The event bus must outlive the frontend.  The
@@ -125,6 +130,7 @@ public:
 		m_ui.SetViewport( width, height );
 		m_bus->Subscribe( "ui.click", &hfUiFrontend::OnUiEvent, this );
 		m_bus->Subscribe( "ui.change", &hfUiFrontend::OnUiEvent, this );
+		m_keybinds.SetDefaults();
 		SetState( HF_UI_FRONTEND_TITLE );
 	}
 
@@ -136,6 +142,9 @@ public:
 		m_state = HF_UI_FRONTEND_BOOT;
 		m_root = HF_Ecs::ENTITY_NULL;
 		m_resultLabel = HF_Ecs::ENTITY_NULL;
+		m_pendingBindRow = -1;
+		m_keybindRowCount = 0;
+		m_keybindStatus = HF_Ecs::ENTITY_NULL;
 		for ( int i = 0; i < HF_UI_HUD_COUNT; i++ ) { m_hud[ i ] = HF_Ecs::ENTITY_NULL; }
 	}
 
@@ -162,6 +171,16 @@ public:
 	const hfUiSaveSlots & SaveSlots() const { return m_saveSlots; }
 	int GetLastSaveSlot() const { return m_lastSaveSlot; }
 	int GetLastSaveKind() const { return m_lastSaveKind; }
+
+	hfUiKeybinds &			Keybinds() { return m_keybinds; }
+	const hfUiKeybinds &	Keybinds() const { return m_keybinds; }
+	int						GetPendingBindRow() const { return m_pendingBindRow; }
+	int						GetKeybindRowCount() const { return m_keybindRowCount; }
+	HF_Ecs::Entity			GetKeybindButton( int row ) const {
+		if ( row < 0 || row >= m_keybindRowCount ) { return HF_Ecs::ENTITY_NULL; }
+		return m_keybindRows[ row ].entity;
+	}
+	HF_Ecs::Entity			GetKeybindStatusLabel() const { return m_keybindStatus; }
 
 	float	GetMusicVolume() const { return m_musicVolume; }
 	float	GetSfxVolume() const { return m_sfxVolume; }
@@ -232,6 +251,9 @@ public:
 		m_musicSlider = HF_Ecs::ENTITY_NULL;
 		m_sfxSlider = HF_Ecs::ENTITY_NULL;
 		m_fullscreenToggle = HF_Ecs::ENTITY_NULL;
+		m_pendingBindRow = -1;
+		m_keybindRowCount = 0;
+		m_keybindStatus = HF_Ecs::ENTITY_NULL;
 		for ( int i = 0; i < HF_UI_HUD_COUNT; i++ ) { m_hud[ i ] = HF_Ecs::ENTITY_NULL; }
 
 		BuildState( state );
@@ -349,6 +371,13 @@ public:
 					}
 					return true;
 				}
+				// A pending rebind captures the next key press.  Escape cancels
+				// so the options screen never becomes a keyboard trap.
+				if ( m_pendingBindRow >= 0 ) {
+					if ( ev.evValue2 == 0 ) { return true; }
+					FinishKeybind( key );
+					return true;
+				}
 				if ( ev.evValue2 != 0 ) {
 					if ( key == K_ENTER || key == K_SPACE ) { ActivateFocused(); return true; }
 					if ( key == K_ESCAPE ) { Back(); return true; }
@@ -370,6 +399,11 @@ public:
 		const int action = FindBoundAction( m_input.GetFocused() );
 		if ( action != HF_UI_ACTION_NONE ) {
 			PerformAction( action );
+			return;
+		}
+		const int row = FindKeybindRow( m_input.GetFocused() );
+		if ( row >= 0 ) {
+			BeginKeybind( row );
 		}
 	}
 
@@ -382,6 +416,7 @@ public:
 			m_input.Update( m_registry, m_ui, *m_bus );
 			m_input.EndFrame();
 		}
+		m_input.ApplyFocus( m_registry );
 
 		// Mouse handlers only record the intent; apply it after input
 		// dispatch so a transition never destroys entities mid-iteration.
@@ -417,6 +452,7 @@ public:
 			case HF_UI_FRONTEND_PLAYING:	return "playing";
 			case HF_UI_FRONTEND_PAUSED:		return "paused";
 			case HF_UI_FRONTEND_RESULTS:	return "results";
+			case HF_UI_FRONTEND_SAVES:		return "saves";
 			default:						return "?";
 		}
 	}
@@ -445,6 +481,11 @@ private:
 			const int action = FindBoundAction( ev->entity );
 			if ( action != HF_UI_ACTION_NONE ) {
 				m_pendingAction = action;
+				return;
+			}
+			const int row = FindKeybindRow( ev->entity );
+			if ( row >= 0 ) {
+				BeginKeybind( row );
 				return;
 			}
 			if ( m_state == HF_UI_FRONTEND_SAVES ) {
@@ -483,6 +524,93 @@ private:
 			if ( m_binds[ i ].entity == entity ) { return m_binds[ i ].action; }
 		}
 		return HF_UI_ACTION_NONE;
+	}
+
+	// --- keybind row helpers ----------------------------------------------
+
+	int FindKeybindRow( HF_Ecs::Entity entity ) const {
+		if ( entity == HF_Ecs::ENTITY_NULL ) { return -1; }
+		for ( int i = 0; i < m_keybindRowCount; i++ ) {
+			if ( m_keybindRows[ i ].entity == entity ) { return i; }
+		}
+		return -1;
+	}
+
+	// Local names keep the UI header self-contained (the harness does not
+	// link the engine's key-input translation unit).
+	static const char * KeyName( int key ) {
+		if ( key <= 0 ) { return "UNBOUND"; }
+		struct NameEntry { int key; const char *name; };
+		static const NameEntry names[] = {
+			{ K_ESCAPE, "ESC" }, { K_ENTER, "ENTER" }, { K_SPACE, "SPACE" },
+			{ K_TAB, "TAB" }, { K_BACKSPACE, "BKSP" },
+			{ K_UPARROW, "UP" }, { K_DOWNARROW, "DOWN" },
+			{ K_LEFTARROW, "LEFT" }, { K_RIGHTARROW, "RIGHT" },
+			{ K_JOY_DPAD_UP, "PAD UP" }, { K_JOY_DPAD_DOWN, "PAD DOWN" },
+			{ K_JOY_DPAD_LEFT, "PAD LEFT" }, { K_JOY_DPAD_RIGHT, "PAD RIGHT" },
+			{ K_1, "1" }, { K_2, "2" }, { K_3, "3" }, { K_4, "4" }, { K_5, "5" },
+			{ K_6, "6" }, { K_7, "7" }, { K_8, "8" }, { K_9, "9" }, { K_0, "0" },
+			{ K_Q, "Q" }, { K_W, "W" }, { K_E, "E" }, { K_R, "R" }, { K_T, "T" },
+			{ K_Y, "Y" }, { K_U, "U" }, { K_I, "I" }, { K_O, "O" }, { K_P, "P" },
+			{ K_A, "A" }, { K_S, "S" }, { K_D, "D" }, { K_F, "F" }, { K_G, "G" },
+			{ K_H, "H" }, { K_J, "J" }, { K_K, "K" }, { K_L, "L" },
+			{ K_Z, "Z" }, { K_X, "X" }, { K_C, "C" }, { K_V, "V" },
+			{ K_B, "B" }, { K_N, "N" }, { K_M, "M" }
+		};
+		for ( int i = 0; i < ( int )( sizeof( names ) / sizeof( names[ 0 ] ) ); i++ ) {
+			if ( names[ i ].key == key ) { return names[ i ].name; }
+		}
+		static char fallback[ 32 ];
+		snprintf( fallback, sizeof( fallback ), "KEY %d", key );
+		return fallback;
+	}
+
+	void SetKeybindStatus( const char *text ) {
+		if ( m_keybindStatus != HF_Ecs::ENTITY_NULL ) { SetLabelText( m_keybindStatus, text ); }
+	}
+
+	HF_Ecs::Entity FindChildLabel( HF_Ecs::Entity parent ) {
+		if ( parent == HF_Ecs::ENTITY_NULL ) { return HF_Ecs::ENTITY_NULL; }
+		HF_Ecs::Entity found = HF_Ecs::ENTITY_NULL;
+		m_registry.Each< hfUiLabelComponent >( [&]( HF_Ecs::Entity ent, hfUiLabelComponent & ) {
+			if ( found != HF_Ecs::ENTITY_NULL ) { return; }
+			const hfUiCanvasComponent *c = m_registry.GetComponent< hfUiCanvasComponent >( ent );
+			if ( c != NULL && c->parent == parent ) { found = ent; }
+		} );
+		return found;
+	}
+
+	void BeginKeybind( int row ) {
+		if ( row < 0 || row >= m_keybindRowCount ) { return; }
+		m_pendingBindRow = row;
+		SetKeybindStatus( "PRESS A KEY (ESC TO CANCEL)" );
+	}
+
+	void FinishKeybind( int key ) {
+		const int row = m_pendingBindRow;
+		m_pendingBindRow = -1;
+		if ( row < 0 || row >= m_keybindRowCount ) { return; }
+		const int index = m_keybindRows[ row ].index;
+		const char *action = m_keybinds.ActionAt( index );
+
+		if ( key == K_ESCAPE ) {
+			SetKeybindStatus( "BIND CANCELLED" );
+			return;
+		}
+		if ( action == NULL || !m_keybinds.Bind( action, key ) ) {
+			const char *conflict = m_keybinds.GetLastConflictAction();
+			char buf[ 128 ];
+			snprintf( buf, sizeof( buf ), "ALREADY BOUND TO %s", conflict != NULL ? conflict : "?" );
+			SetKeybindStatus( buf );
+			return;
+		}
+
+		char buf[ 128 ];
+		snprintf( buf, sizeof( buf ), "%s = %s", action, KeyName( key ) );
+		SetKeybindStatus( buf );
+		const HF_Ecs::Entity button = m_keybindRows[ row ].entity;
+		const HF_Ecs::Entity label = FindChildLabel( button );
+		if ( label != HF_Ecs::ENTITY_NULL ) { SetLabelText( label, KeyName( key ) ); }
 	}
 
 	void Bind( HF_Ecs::Entity entity, int action ) {
@@ -579,22 +707,44 @@ private:
 		const float controlX = m_width * 0.42f;
 		const float controlW = m_width * 0.32f;
 
-		AddLabel( root, 0.0f, 90.0f, m_width, 44.0f, "OPTIONS", 2.0f,
+		AddLabel( root, 0.0f, 70.0f, m_width, 44.0f, "OPTIONS", 2.0f,
 				  HF_UI_TEXT_CENTER, 0.95f, 0.55f, 0.15f );
 
-		AddLabel( root, labelX, 210.0f, 160.0f, 28.0f, "MUSIC", 1.5f, HF_UI_TEXT_LEFT );
-		m_musicSlider = hfUiBuilder::CreateSlider( m_registry, root, controlX, 208.0f, controlW, 28.0f,
+		AddLabel( root, labelX, 170.0f, 160.0f, 28.0f, "MUSIC", 1.5f, HF_UI_TEXT_LEFT );
+		m_musicSlider = hfUiBuilder::CreateSlider( m_registry, root, controlX, 168.0f, controlW, 28.0f,
 												   0.0f, 100.0f, m_musicVolume );
 
-		AddLabel( root, labelX, 262.0f, 160.0f, 28.0f, "SOUND FX", 1.5f, HF_UI_TEXT_LEFT );
-		m_sfxSlider = hfUiBuilder::CreateSlider( m_registry, root, controlX, 260.0f, controlW, 28.0f,
+		AddLabel( root, labelX, 214.0f, 160.0f, 28.0f, "SOUND FX", 1.5f, HF_UI_TEXT_LEFT );
+		m_sfxSlider = hfUiBuilder::CreateSlider( m_registry, root, controlX, 212.0f, controlW, 28.0f,
 												 0.0f, 100.0f, m_sfxVolume );
 
-		AddLabel( root, labelX, 314.0f, 160.0f, 28.0f, "FULLSCREEN", 1.5f, HF_UI_TEXT_LEFT );
-		m_fullscreenToggle = hfUiBuilder::CreateToggle( m_registry, root, controlX, 310.0f,
+		AddLabel( root, labelX, 258.0f, 160.0f, 28.0f, "FULLSCREEN", 1.5f, HF_UI_TEXT_LEFT );
+		m_fullscreenToggle = hfUiBuilder::CreateToggle( m_registry, root, controlX, 256.0f,
 														controlW, 28.0f, "ENABLED", m_fullscreen );
 
-		AddButton( root, ( m_width - 300.0f ) * 0.5f, 430.0f, 300.0f, 46.0f, "BACK", HF_UI_ACTION_BACK );
+		AddLabel( root, 0.0f, 300.0f, m_width, 24.0f, "KEY BINDINGS", 1.25f,
+				  HF_UI_TEXT_CENTER, 0.95f, 0.55f, 0.15f );
+
+		m_keybindRowCount = 0;
+		const int rows = m_keybinds.Count() < 5 ? m_keybinds.Count() : 5;
+		for ( int i = 0; i < rows; i++ ) {
+			const float y = 338.0f + ( float )i * 31.0f;
+			const char *action = m_keybinds.ActionAt( i );
+			AddLabel( root, labelX, y, 160.0f, 24.0f, action != NULL ? action : "?", 1.0f, HF_UI_TEXT_LEFT );
+			char buf[ 64 ];
+			snprintf( buf, sizeof( buf ), "%s", KeyName( m_keybinds.Primary( i ) ) );
+			const HF_Ecs::Entity button = AddButton( root, controlX, y - 2.0f, controlW, 26.0f,
+													 buf, HF_UI_ACTION_NONE );
+			m_keybindRows[ m_keybindRowCount ].entity = button;
+			m_keybindRows[ m_keybindRowCount ].index = i;
+			m_keybindRowCount++;
+		}
+
+		m_keybindStatus = AddLabel( root, 0.0f, 510.0f, m_width, 24.0f,
+									"CLICK A BINDING, THEN PRESS A KEY", 1.0f,
+									HF_UI_TEXT_CENTER, 0.55f, 0.58f, 0.65f );
+
+		AddButton( root, ( m_width - 300.0f ) * 0.5f, 560.0f, 300.0f, 46.0f, "BACK", HF_UI_ACTION_BACK );
 	}
 
 	void BuildLoading() {
@@ -716,6 +866,16 @@ private:
 	hfUiSaveSlots		m_saveSlots;
 	int					m_lastSaveSlot;
 	int					m_lastSaveKind;
+
+	hfUiKeybinds		m_keybinds;
+	struct KeybindRow {
+		HF_Ecs::Entity	entity;
+		int				index;
+	};
+	KeybindRow			m_keybindRows[ 8 ];
+	int					m_keybindRowCount;
+	int					m_pendingBindRow;
+	HF_Ecs::Entity		m_keybindStatus;
 
 	BoundAction			m_binds[ 32 ];
 	int					m_bindCount;

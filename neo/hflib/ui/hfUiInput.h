@@ -110,6 +110,14 @@ public:
 		return true;
 	}
 
+	// Mirror the focused entity into hfUiFocusComponent so a draw pass (or a
+	// test) can render/inspect focus without depending on hfUiInput itself.
+	void ApplyFocus( HF_Ecs::Registry &registry ) const {
+		registry.Each< hfUiFocusComponent >( [&]( HF_Ecs::Entity ent, hfUiFocusComponent &f ) {
+			f.focused = ( ent == m_focused );
+		} );
+	}
+
 	void Update( HF_Ecs::Registry &registry, class hfUiSystem &ui, HF_Ecs::EventBus &bus ) {
 		HF_Ecs::Entity hit = ui.HitTest( m_mouseX, m_mouseY );
 		

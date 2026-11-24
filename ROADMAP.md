@@ -242,7 +242,14 @@ architecture, never copy code.
   outside the slider rect) and directional focus traversal (`MoveFocus`).
   `hfUiFrontend` adds a SAVES state/screen built from `hfUiSaveSlots`, routes
   slot clicks to save-slot actions, and handles arrow/D-pad/TAB focus
-  traversal through `HandleSysEvent`.
+  traversal through `HandleSysEvent`. Focus is mirrored into
+  `hfUiFocusComponent` for a visible draw-pass ring. The options screen now
+  has clickable keybind rows: click, press a key, and conflicts are rejected
+  and shown in a status label. `hfUiSettings::ApplyToCVars` maps the settings
+  to live cvars (`s_volume_dB`, `sensitivity`, `r_fullscreen`,
+  `r_customWidth`/`Height`, `r_vidMode`, `opt_applyPreset`, `r_swapInterval`),
+  and `hfCommonLocal` loads/applies/saves the per-account settings around
+  frontend boot and options edits.
 - **Godot ref:** `/home/kali/godot/scene/resources/theme.cpp` and
   `/home/kali/godot/core/input/input_map.cpp`.
   Engine boot now mounts the frontend in `hfCommonLocal` (init/shutdown/frame,
@@ -255,6 +262,9 @@ architecture, never copy code.
   real console save slot for the signed-in user, clamping, options-screen
   mirroring, a save-slot panel driven by an actual click whose entity
   resolves back to `(slot, SAVE)`, and frontend SAVES screen routing.
-  `Test_UiWidgets` also covers slider drag with pointer capture.
+  `Test_UiWidgets` also covers slider drag with pointer capture and focus
+  mirroring. Cvar mapping is checked with a pure `ComputeCvarValues` (no cvar
+  system needed), and the keybind rows are clicked through `hfUiInput` with a
+  conflicting key rejected and a free key accepted.
   `phase 11 persistence: ok` → `ALL PASSED`, plain and `--headless`, default
   and Jolt (4/4 matrix). Both engine configs rebuilt with the frontend mounted.

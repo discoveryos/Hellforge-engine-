@@ -3726,6 +3726,28 @@ static void Test_UiWidgets() {
 		drag.EndFrame();
 		FEAT_ASSERT( tapC.count >= 1 );
 	}
+
+	// Focus ring state: input focus is mirrored into the draw-pass component.
+	{
+		FEAT_ASSERT( registry.Has< hfUiFocusComponent >( btn ) );
+		FEAT_ASSERT( registry.Has< hfUiFocusComponent >( slider ) );
+		hfUiInput focusInput;
+		focusInput.SetFocused( btn );
+		focusInput.ApplyFocus( registry );
+		hfUiFocusComponent *bf = registry.GetComponent< hfUiFocusComponent >( btn );
+		hfUiFocusComponent *sf = registry.GetComponent< hfUiFocusComponent >( slider );
+		FEAT_ASSERT( bf != NULL && bf->focused );
+		FEAT_ASSERT( sf != NULL && !sf->focused );
+		FEAT_ASSERT( bf->thickness > 0.0f );
+
+		FEAT_ASSERT( focusInput.MoveFocus( registry, ui, bus, 0, 1 ) );
+		focusInput.ApplyFocus( registry );
+		FEAT_ASSERT( !bf->focused );
+		FEAT_ASSERT( sf->focused );
+		focusInput.SetFocused( HF_Ecs::ENTITY_NULL );
+		focusInput.ApplyFocus( registry );
+		FEAT_ASSERT( !sf->focused );
+	}
 	
 	// Text input
 	hfUiTextInputComponent *ticomp = registry.GetComponent< hfUiTextInputComponent >( input );
@@ -4179,6 +4201,81 @@ static void Test_UiPersistence() {
 		FEAT_ASSERT( f.GetLastSaveKind() == hfUiSaveSlots::HF_UI_SAVE_KIND_SAVE );
 		f.Back();
 		FEAT_ASSERT( f.GetState() == hfUiFrontend::HF_UI_FRONTEND_TITLE );
+	}
+
+	// Settings -> engine cvars is a pure mapping plus a guarded cvar sink.
+	{
+		hfUiSettings s;
+		s.musicVolume = 100.0f;
+		s.sfxVolume = 60.0f;
+		s.mouseSensitivity = 2.0f;
+		s.width = 1920;
+		s.height = 1080;
+		s.quality = 1;
+		s.fullscreen = true;
+		s.vsync = false;
+
+		hfUiSettings::hfUiCvarValues v;
+		s.ComputeCvarValues( v );
+		FEAT_ASSERT( v.volumeDb < 0.0f && v.volumeDb > -3.0f ); // 80% master
+		FEAT_NEAR( v.sensitivity, 2.0f, 0.001f );
+		FEAT_ASSERT( v.fullscreen == 1 );
+		FEAT_ASSERT( v.width == 1920 && v.height == 1080 );
+		FEAT_ASSERT( v.vidMode == -1 );
+		FEAT_ASSERT( v.quality == 1 );
+		FEAT_ASSERT( v.swapInterval == 0 );
+
+		s.musicVolume = 0.0f;
+		s.sfxVolume = 0.0f;
+		s.ComputeCvarValues( v );
+		FEAT_NEAR( v.volumeDb, -60.0f, 0.001f );
+		FEAT_ASSERT( !s.ApplyToCVars( ( hfCVarSystem * )NULL ) );
+	}
+
+	// Options keybind rows: click -> capture key, conflicts rejected and shown.
+	{
+		HF_Ecs::EventBus kbus;
+		hfUiFrontend f;
+		f.Init( kbus, 1024.0f, 768.0f );
+		f.SetState( hfUiFrontend::HF_UI_FRONTEND_MENU );
+		FEAT_ASSERT( f.GetKeybindRowCount() > 0 );
+		const HF_Ecs::Entity button = f.GetKeybindButton( 0 );
+		FEAT_ASSERT( button != HF_Ecs::ENTITY_NULL );
+		f.Update( 0.016f );
+		const hfUiRect kr = f.System().GetRect( button );
+		FEAT_ASSERT( !kr.Empty() );
+
+		f.SetMouse( kr.x + kr.w * 0.5f, kr.y + kr.h * 0.5f );
+		f.SetButton( HF_UI_MOUSE_LEFT, true );
+		f.Update( 0.016f );
+		f.SetButton( HF_UI_MOUSE_LEFT, false );
+		f.Update( 0.016f );
+		FEAT_ASSERT( f.GetPendingBindRow() == 0 );
+
+		sysEvent_t key;
+		memset( &key, 0, sizeof( key ) );
+		key.evType = SE_KEY;
+		key.evValue = K_A; // already owned by move_left
+		key.evValue2 = 1;
+		FEAT_ASSERT( f.HandleSysEvent( key ) );
+		FEAT_ASSERT( f.GetPendingBindRow() == -1 );
+		const int moveUp = f.Keybinds().Find( "move_up" );
+		FEAT_ASSERT( moveUp >= 0 );
+		FEAT_ASSERT( f.Keybinds().Primary( moveUp ) == K_W );
+		FEAT_ASSERT( hfStr::Icmp( f.Keybinds().GetLastConflictAction(), "move_left" ) == 0 );
+		const hfUiLabelComponent *status = f.RegistryPtr()->GetComponent< hfUiLabelComponent >( f.GetKeybindStatusLabel() );
+		FEAT_ASSERT( status != NULL && strstr( status->text, "move_left" ) != NULL );
+
+		// A free key rebinds and refreshes the row label.
+		f.SetButton( HF_UI_MOUSE_LEFT, true );
+		f.Update( 0.016f );
+		f.SetButton( HF_UI_MOUSE_LEFT, false );
+		f.Update( 0.016f );
+		FEAT_ASSERT( f.GetPendingBindRow() == 0 );
+		key.evValue = K_T;
+		FEAT_ASSERT( f.HandleSysEvent( key ) );
+		FEAT_ASSERT( f.Keybinds().Primary( moveUp ) == K_T );
+		FEAT_ASSERT( f.Keybinds().GetLastConflictAction() == NULL );
 	}
 
 	int added = g_featFails - fc;

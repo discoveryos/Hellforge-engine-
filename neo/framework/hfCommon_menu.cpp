@@ -3,7 +3,15 @@
 
 #include "hfCommon_local.h"
 #include "../hflib/ui/hfUiFrontend.h"
+#include "../hflib/ui/hfUiSettings.h"
 #include "../renderer/hfUiDrawPass.h"
+
+// Durable mirror of the options screen.  Loaded from the signed-in user's
+// console slot at boot; edits are written back and applied to live cvars.
+static HF_Ui::hfUiSettings	s_frontendSettings;
+static float				s_frontendMusic = -1.0f;
+static float				s_frontendSfx = -1.0f;
+static bool					s_frontendFullscreen = false;
 
 /*
 ==============
@@ -118,6 +126,18 @@ void hfCommonLocal::InitFrontend() {
 	uiFrontend->Init( *uiEventBus, w, h );
 	uiFrontend->SetActionHandler( HF_FrontendActionHandler, NULL );
 	hfUiDrawPass::SetSource( uiFrontend->RegistryPtr(), uiFrontend->SystemPtr() );
+
+	hfconsole::hfConsoleServices *services = hfconsole::HfConsole_GetServices();
+	const hfconsole::hfConsoleUserId user = ( services != NULL ) ? services->GetUserId( 0 )
+															 : hfconsole::hfConsoleUserId( 0 );
+	if ( services != NULL ) {
+		s_frontendSettings.LoadFromSlot( services, user );
+	}
+	s_frontendSettings.WriteTo( *uiFrontend );
+	s_frontendSettings.ApplyToCVars();
+	s_frontendMusic = s_frontendSettings.musicVolume;
+	s_frontendSfx = s_frontendSettings.sfxVolume;
+	s_frontendFullscreen = s_frontendSettings.fullscreen;
 }
 
 /*
@@ -157,6 +177,26 @@ void hfCommonLocal::FrontendFrame() {
 	}
 	// Advance the frontend (fixed-step sim happens inside when PLAYING).
 	uiFrontend->Update( 1.0f / 60.0f );
+
+	// Options edits are durable and take effect live.  Compare against the
+	// last applied mirror so a drag writes once per changed value, not every
+	// frame while the mouse is idle.
+	{
+		const float music = uiFrontend->GetMusicVolume();
+		const float sfx = uiFrontend->GetSfxVolume();
+		const bool fullscreen = uiFrontend->GetFullscreen();
+		if ( music != s_frontendMusic || sfx != s_frontendSfx || fullscreen != s_frontendFullscreen ) {
+			s_frontendMusic = music;
+			s_frontendSfx = sfx;
+			s_frontendFullscreen = fullscreen;
+			s_frontendSettings.ReadFrom( *uiFrontend );
+			s_frontendSettings.ApplyToCVars();
+			hfconsole::hfConsoleServices *services = hfconsole::HfConsole_GetServices();
+			if ( services != NULL ) {
+				s_frontendSettings.SaveToSlot( services, services->GetUserId( 0 ) );
+			}
+		}
+	}
 
 	if ( uiFrontend->QuitRequested() ) {
 		uiFrontend->ClearQuitRequest();

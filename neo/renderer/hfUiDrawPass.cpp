@@ -246,6 +246,36 @@ void hfUiDrawPass::Draw( HF_Ecs::Registry &registry, HF_Ui::hfUiSystem &uiSystem
 			}
 		}
 		
+		// Focus ring.  Kept in hfUiFocusComponent by hfUiInput::ApplyFocus so
+		// the draw pass stays a pure consumer of widget state.
+		const HF_Ui::hfUiFocusComponent *focus = registry.GetComponent< HF_Ui::hfUiFocusComponent >( ent );
+		if ( focus != NULL && focus->focused ) {
+			const float t = focus->thickness > 0.0f ? focus->thickness : 1.0f;
+			GL_Color( focus->r, focus->g, focus->b, focus->a );
+			qglBegin( GL_QUADS );
+			// top
+			qglVertex2f( visible.x, visible.y );
+			qglVertex2f( visible.x + visible.w, visible.y );
+			qglVertex2f( visible.x + visible.w, visible.y + t );
+			qglVertex2f( visible.x, visible.y + t );
+			// bottom
+			qglVertex2f( visible.x, visible.y + visible.h - t );
+			qglVertex2f( visible.x + visible.w, visible.y + visible.h - t );
+			qglVertex2f( visible.x + visible.w, visible.y + visible.h );
+			qglVertex2f( visible.x, visible.y + visible.h );
+			// left
+			qglVertex2f( visible.x, visible.y );
+			qglVertex2f( visible.x + t, visible.y );
+			qglVertex2f( visible.x + t, visible.y + visible.h );
+			qglVertex2f( visible.x, visible.y + visible.h );
+			// right
+			qglVertex2f( visible.x + visible.w - t, visible.y );
+			qglVertex2f( visible.x + visible.w, visible.y );
+			qglVertex2f( visible.x + visible.w, visible.y + visible.h );
+			qglVertex2f( visible.x + visible.w - t, visible.y + visible.h );
+			qglEnd();
+		}
+
 		// Text label
 		const HF_Ui::hfUiLabelComponent *label = registry.GetComponent< HF_Ui::hfUiLabelComponent >( ent );
 		if ( label && label->visible && label->text[0] ) {

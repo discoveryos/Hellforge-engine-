@@ -27,11 +27,14 @@
 */
 
 #include "../hfprecompiled.h"
+#include "../framework/hfCmdSystem.h"
+#include "../framework/hfCVarSystem.h"
 #include "../console/hfConsoleServices.h"
 #include "hfUiFrontend.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 
 namespace HF_Ui {
 
@@ -148,6 +151,51 @@ struct hfUiSettings {
 		Clamp();
 	}
 
+	// --- engine application ----------------------------------------------
+
+	struct hfUiCvarValues {
+		float	volumeDb;
+		float	sensitivity;
+		int		fullscreen;
+		int		width, height, vidMode;
+		int		quality;
+		int		swapInterval;
+	};
+
+	// Pure mapping so it can be checked in a headless test with no cvar
+	// system installed.  The single engine master-volume cvar is driven by
+	// the average of the two UI sliders, in dB (100% == 0 dB).
+	void ComputeCvarValues( hfUiCvarValues &out ) const {
+		const float master = ClampF( ( musicVolume + sfxVolume ) * 0.5f, 0.0f, 100.0f );
+		out.volumeDb = master <= 0.0f ? -60.0f : 20.0f * log10f( master / 100.0f );
+		out.volumeDb = ClampF( out.volumeDb, -60.0f, 0.0f );
+		out.sensitivity = ClampF( mouseSensitivity, 0.1f, 10.0f );
+
+		out.fullscreen = fullscreen ? 1 : 0;
+		out.width = ( int )ClampF( ( float )width, 320.0f, 4096.0f );
+		out.height = ( int )ClampF( ( float )height, 200.0f, 4096.0f );
+		out.vidMode = -1;	// -1 selects r_customWidth / r_customHeight
+		out.quality = ( int )ClampF( ( float )quality, 0.0f, 3.0f );
+		out.swapInterval = vsync ? 1 : 0;
+	}
+
+	bool ApplyToCVars( hfCVarSystem *cvars ) const {
+		if ( cvars == NULL ) { return false; }
+		hfUiCvarValues v;
+		ComputeCvarValues( v );
+		cvars->SetCVarFloat( "s_volume_dB", v.volumeDb );
+		cvars->SetCVarFloat( "sensitivity", v.sensitivity );
+		cvars->SetCVarInteger( "r_fullscreen", v.fullscreen );
+		cvars->SetCVarInteger( "r_customWidth", v.width );
+		cvars->SetCVarInteger( "r_customHeight", v.height );
+		cvars->SetCVarInteger( "r_vidMode", v.vidMode );
+		cvars->SetCVarInteger( "opt_applyPreset", v.quality );
+		cvars->SetCVarInteger( "r_swapInterval", v.swapInterval );
+		return true;
+	}
+
+	bool ApplyToCVars() const { return ApplyToCVars( hfLib::cvarSystem ); }
+
 	// --- per-account storage ---------------------------------------------
 
 	bool SaveToSlot( hfConsoleServices *services, hfConsoleUserId user,
@@ -173,6 +221,10 @@ struct hfUiSettings {
 	}
 
 private:
+	static float ClampF( float v, float lo, float hi ) {
+		return v < lo ? lo : ( v > hi ? hi : v );
+	}
+
 	static char *Trim( char *s ) {
 		while ( *s == ' ' || *s == '\t' ) { s++; }
 		int len = ( int )strlen( s );

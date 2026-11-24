@@ -56,6 +56,21 @@ struct hfUiPanelComponent {
 	}
 };
 
+// --- Focus ring ---------------------------------------------------------------
+// Attached to interactive controls by hfUiBuilder.  Hosts mirror the input
+// system's focused entity into it once per frame; the draw pass consumes it.
+struct hfUiFocusComponent {
+	bool	focused;
+	float	thickness;
+	float	r, g, b, a;
+
+	HF_INLINE hfUiFocusComponent() {
+		focused = false;
+		thickness = 2.0f;
+		r = 0.95f; g = 0.55f; b = 0.15f; a = 1.0f;
+	}
+};
+
 // --- Button ------------------------------------------------------------------
 enum hfUiButtonState {
 	HF_UI_BUTTON_NORMAL = 0,

@@ -74,6 +74,7 @@ public:
 		c.visible = true;
 		c.interactive = true;
 		reg.AddComponent< hfUiButtonComponent >( e );
+		reg.AddComponent< hfUiFocusComponent >( e );
 		
 		// Add label centered in button
 		HF_Ecs::Entity lbl = reg.Create();
@@ -102,6 +103,7 @@ public:
 		c.interactive = true;
 		hfUiSliderComponent &s = reg.AddComponent< hfUiSliderComponent >( e );
 		s.minValue = minv; s.maxValue = maxv; s.value = val;
+		reg.AddComponent< hfUiFocusComponent >( e );
 		return e;
 	}
 	
@@ -115,6 +117,7 @@ public:
 		c.interactive = true;
 		hfUiToggleComponent &t = reg.AddComponent< hfUiToggleComponent >( e );
 		t.checked = checked;
+		reg.AddComponent< hfUiFocusComponent >( e );
 		
 		// Label to the right
 		HF_Ecs::Entity lbl = reg.Create();
@@ -141,6 +144,7 @@ public:
 		c.interactive = true;
 		hfUiTextInputComponent &ti = reg.AddComponent< hfUiTextInputComponent >( e );
 		if ( placeholder ) hfStr::Copynz( ti.placeholder, placeholder, sizeof(ti.placeholder) );
+		reg.AddComponent< hfUiFocusComponent >( e );
 		return e;
 	}
 	

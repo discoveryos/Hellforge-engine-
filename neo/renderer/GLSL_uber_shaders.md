@@ -2055,6 +2055,15 @@ same behaviour. `WriteTo(frontend)` / `ReadFrom(frontend)` mirror the struct
 onto the options screen, so loading a profile updates the sliders and checkbox
 without the screen knowing where the values came from.
 
+`ApplyToCVars(hfCVarSystem*)` pushes the values into the live engine:
+`s_volume_dB` from the average of the two UI volumes (100% == 0 dB),
+`sensitivity`, `r_fullscreen`, `r_customWidth`/`r_customHeight` with
+`r_vidMode = -1`, `opt_applyPreset` from quality, and `r_swapInterval` from
+vsync. `ComputeCvarValues()` is the pure mapping and can be tested with no cvar
+system installed; the guarded overload uses `hfLib::cvarSystem`.
+`hfCommonLocal` loads and applies settings when the frontend boots and writes
+them back when the options screen changes.
+
 ### `hfUiSaveSlots` — the save UI over that same storage
 
 `neo/hflib/ui/hfUiSaveSlots.h` builds one row per slot (label plus
@@ -2087,28 +2096,33 @@ Slot keys are `save1`, `save2`, … so they stay stable across runs.
   and the options screen mirrors both directions;
 - save-slot panel: build three rows, resolve a button to `(slot 1, SAVE)`,
   exercise the storage facade, then click the slot-0 SAVE button through
-  `hfUiInput` and resolve the clicked entity back to `(slot 0, SAVE)`.
+  `hfUiInput` and resolve the clicked entity back to `(slot 0, SAVE)`;
+- frontend SAVES routing, pure cvar mapping, and keybind-row capture: a
+  conflicting key is rejected with the owning action shown in the status
+  label, a free key rebinds and refreshes the row button.
 
 Harness output: `phase 11 persistence: ok` → `ALL PASSED`, plain and
 `--headless`, default and Jolt.
 
 ### Known gaps
 
-- **No live application to the engine.** Settings store and mirror values,
-  but applying resolution/quality/vsync to the renderer and the mixer is a
-  host step; no cvar bridge ships here.
-- **No keybind conflict UI.** Conflicts are rejected in the model; showing
-  "already bound to move_up" in the options screen is presentation work.
+- **Cvar application is a snapshot, not a live preview.** Settings are applied
+  at boot and on options edits; resolution changes take effect on the next
+  video restart, and there is no "apply/revert" screen yet.
+- **Keybind UI is minimal.** The options screen lists the first five actions
+  with primary-key buttons; a click captures the next key, shows conflicts,
+  and Escape cancels. Secondary bindings, gamepad binds and per-action paging
+  are not exposed yet.
 - **Save/load policy is host-owned.** The frontend now has a SAVES state/screen
   built from `hfUiSaveSlots`; slot delete has a default refresh, but actual
   save/load payloads are still game policy.
 - **The theme has no font or nine-patch yet.** Colours and two geometry knobs
   are what the current draw pass can express; a glyph atlas and stretchable
   borders need draw-pass work.
-- **Input coverage is partial.** Slider drag now uses pointer capture and
-  arrow/D-pad/TAB focus traversal is wired through `MoveFocus`/`HandleSysEvent`,
-  but there is no visible focus ring yet and stick/analog traversal is still
-  minimal.
+- **Input coverage is partial.** Slider drag uses pointer capture, focus is
+  mirrored into `hfUiFocusComponent` and drawn as a ring by `hfUiDrawPass`,
+  and arrow/D-pad/TAB traversal is wired through `HandleSysEvent`; analog
+  stick traversal is still minimal.
 - **Menu/desktop input is now partially unified.** `hfCommonLocal` owns an
   `hfUiFrontend` + `HF_Ecs::EventBus`, initializes it at boot, installs it as
   the `hfUiDrawPass` source, and routes `Sys_*` events through
