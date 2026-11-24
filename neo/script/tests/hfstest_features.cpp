@@ -36,6 +36,7 @@
 #include "../../hflib/ui/hfUiKeybinds.h"
 #include "../../hflib/ui/hfUiSettings.h"
 #include "../../hflib/ui/hfUiSaveSlots.h"
+#include "../../hflib/game/hfArenaSave.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -2862,6 +2863,7 @@ static void Test_Console();
 static void Test_UiWidgets();
 static void Test_UiFrontend();
 static void Test_UiPersistence();
+static void Test_FrontendIntegration();
 
 /*
 ================================
@@ -3229,6 +3231,7 @@ int HfTest_FeaturesMain() {
 	Test_UiWidgets();
 	Test_UiFrontend();
 	Test_UiPersistence();
+	Test_FrontendIntegration();
 	printf( "features logic: %s (%d failures)\n", g_featFails == 0 ? "ok" : "FAIL", g_featFails );
 	return g_featFails;
 }
@@ -4280,4 +4283,200 @@ static void Test_UiPersistence() {
 
 	int added = g_featFails - fc;
 	printf( "phase 11 persistence: %s\n", added ? "FAIL" : "ok" );
+}
+
+// A host that takes over START (real map load) sets LOADING and marks the
+// action handled.  The frontend must not also reset the arena and enter
+// PLAYING behind the host's back.
+struct FrontendHostTap {
+	int					starts;
+	HF_Ui::hfUiFrontend *frontend;
+};
+
+static void FrontendHostHandler( int action, void *user ) {
+	FrontendHostTap *tap = ( FrontendHostTap * )user;
+	if ( action == HF_Ui::hfUiFrontend::HF_UI_ACTION_START && tap != NULL && tap->frontend != NULL ) {
+		tap->starts++;
+		tap->frontend->SetState( HF_Ui::hfUiFrontend::HF_UI_FRONTEND_LOADING );
+		tap->frontend->MarkHostHandled();
+	}
+}
+
+static void Test_FrontendIntegration() {
+	using namespace HF_Ui;
+	using namespace hfconsole;
+	int fc = g_featFails;
+
+	// (a) host-handled START keeps the host's LOADING transition
+	{
+		HF_Ecs::EventBus bus;
+		HfArena arena;
+		arena.Reset( 5 );
+		for ( int i = 0; i < 5; i++ ) { arena.Step(); }
+		const int ticksBefore = arena.ticks;
+
+		hfUiFrontend fe;
+		fe.SetArena( &arena );
+		fe.Init( bus, 1024.0f, 768.0f );
+		FrontendHostTap host = { 0, &fe };
+		fe.SetActionHandler( FrontendHostHandler, &host );
+
+		auto click = [ & ]( HF_Ecs::Entity e ) {
+			if ( e == HF_Ecs::ENTITY_NULL ) { return; }
+			const hfUiRect r = fe.System().GetRect( e );
+			FEAT_ASSERT( !r.Empty() );
+			fe.SetMouse( r.x + r.w * 0.5f, r.y + r.h * 0.5f );
+			fe.SetButton( HF_UI_MOUSE_LEFT, true );
+			fe.Update( 1.0f / 60.0f );
+			fe.SetButton( HF_UI_MOUSE_LEFT, false );
+			fe.Update( 1.0f / 60.0f );
+		};
+
+		click( fe.FindAction( hfUiFrontend::HF_UI_ACTION_START ) );
+		FEAT_ASSERT( host.starts == 1 );
+		FEAT_ASSERT( fe.GetState() == hfUiFrontend::HF_UI_FRONTEND_LOADING );
+		FEAT_ASSERT( arena.ticks == ticksBefore );
+
+		// The flag is per-action: with no host handler the fallback still
+		// owns the transition and resets the arena.
+		fe.SetActionHandler( NULL, NULL );
+		fe.SetState( hfUiFrontend::HF_UI_FRONTEND_TITLE );
+		click( fe.FindAction( hfUiFrontend::HF_UI_ACTION_START ) );
+		FEAT_ASSERT( fe.GetState() == hfUiFrontend::HF_UI_FRONTEND_PLAYING );
+		FEAT_ASSERT( arena.ticks < ticksBefore );	// BeginGame reset, then one sim step
+	}
+
+	// (b) versioned arena snapshot: text round trip, determinism, console slot
+	{
+		HfArena source;
+		source.Reset( 11 );
+		for ( int i = 0; i < 40; i++ ) {
+			if ( ( i % 3 ) == 0 ) { source.Attack(); }
+			else { source.Retreat(); }
+			source.Step();
+		}
+
+		hfArenaSave snapshot;
+		snapshot.Capture( source );
+		char text[ hfArenaSave::HF_ARENA_SAVE_TEXT_MAX ];
+		const int length = snapshot.Serialize( text, sizeof( text ) );
+		FEAT_ASSERT( length > 0 && length < hfArenaSave::HF_ARENA_SAVE_TEXT_MAX );
+		FEAT_ASSERT( strstr( text, "version = 1" ) != NULL );
+
+		hfArenaSave parsed;
+		FEAT_ASSERT( parsed.Parse( text ) );
+		FEAT_ASSERT( parsed.Equals( snapshot ) );
+
+		HfArena restored;
+		restored.Reset( 999 );
+		FEAT_ASSERT( parsed.Restore( restored ) );
+		hfArenaSave restoredSnapshot;
+		restoredSnapshot.Capture( restored );
+		FEAT_ASSERT( restoredSnapshot.Equals( snapshot ) );
+
+		source.Step();
+		restored.Step();
+		FEAT_ASSERT( source.ticks == restored.ticks );
+		FEAT_ASSERT( source.score == restored.score );
+		FEAT_ASSERT( source.hitPoints == restored.hitPoints );
+		FEAT_ASSERT( source.rng == restored.rng );
+
+		hfConsoleServices *services = HfConsole_GetServices();
+		FEAT_ASSERT( services != NULL );
+		const hfConsoleUserId user = services->GetUserId( 0 );
+		services->DeleteSlot( user, "integration-arena" );
+		FEAT_ASSERT( snapshot.SaveToSlot( services, user, "integration-arena" ) );
+		FEAT_ASSERT( services->SlotSize( user, "integration-arena" ) == length );
+		hfArenaSave fromSlot;
+		FEAT_ASSERT( fromSlot.LoadFromSlot( services, user, "integration-arena" ) );
+		FEAT_ASSERT( fromSlot.Equals( snapshot ) );
+		services->DeleteSlot( user, "integration-arena" );
+
+		hfArenaSave bad;
+		FEAT_ASSERT( !bad.Parse( "version = 99\nscore = 1\n" ) );
+	}
+
+	// (c) theme font scale, focus styling and nine-patch panel data
+	{
+		hfUiTheme theme;
+		theme.SetDefaults();
+		FEAT_ASSERT( theme.Parse(
+			"font_scale = 1.5\n"
+			"focus = 0,1,0,1\n"
+			"focus_width = 4\n"
+			"corner_radius = 9\n"
+			"panel_border_width = 3\n" ) );
+		FEAT_NEAR( theme.fontScale, 1.5f, 1e-5f );
+		FEAT_NEAR( theme.focusWidth, 4.0f, 1e-5f );
+		FEAT_NEAR( theme.focus.g, 1.0f, 1e-5f );
+		FEAT_NEAR( theme.cornerRadius, 9.0f, 1e-5f );
+
+		char text[ 4096 ];
+		FEAT_ASSERT( theme.Serialize( text, sizeof( text ) ) > 0 );
+		hfUiTheme copy;
+		copy.SetDefaults();
+		FEAT_ASSERT( copy.Parse( text ) );
+		FEAT_NEAR( copy.fontScale, 1.5f, 1e-5f );
+		FEAT_NEAR( copy.focusWidth, 4.0f, 1e-5f );
+		FEAT_NEAR( copy.focus.g, 1.0f, 1e-5f );
+
+		HF_Ecs::Registry reg;
+		hfUiSystem ui;
+		ui.SetViewport( 1024.0f, 768.0f );
+		HF_Ecs::Entity root = hfUiBuilder::CreatePanel( reg, HF_Ecs::ENTITY_NULL, 0, 0, 1024, 768 );
+		HF_Ecs::Entity panel = hfUiBuilder::CreatePanel( reg, root, 10, 10, 200, 100 );
+		HF_Ecs::Entity button = hfUiBuilder::CreateButton( reg, root, 10, 120, 200, 40, "OK" );
+		HF_Ecs::Entity label = hfUiBuilder::CreateLabel( reg, root, 10, 170, 200, 30, "BIG", 2.0f );
+
+		FEAT_ASSERT( theme.Apply( reg ) >= 4 );
+		hfUiPanelComponent *p = reg.GetComponent< hfUiPanelComponent >( panel );
+		hfUiFocusComponent *f = reg.GetComponent< hfUiFocusComponent >( button );
+		hfUiLabelComponent *l = reg.GetComponent< hfUiLabelComponent >( label );
+		FEAT_ASSERT( p != NULL && f != NULL && l != NULL );
+		FEAT_NEAR( p->cornerRadius, 9.0f, 1e-5f );
+		FEAT_NEAR( p->borderWidth, 3.0f, 1e-5f );
+		FEAT_NEAR( f->thickness, 4.0f, 1e-5f );
+		FEAT_NEAR( f->g, 1.0f, 1e-5f );
+		FEAT_NEAR( l->scale, 3.0f, 1e-5f );
+		theme.Apply( reg );
+		FEAT_NEAR( l->scale, 3.0f, 1e-5f );	// applying twice must not compound
+	}
+
+	// (d) left-stick focus traversal with a deterministic repeat cooldown
+	{
+		HF_Ecs::EventBus bus;
+		hfUiFrontend fe;
+		fe.Init( bus, 1024.0f, 768.0f );
+		fe.SetState( hfUiFrontend::HF_UI_FRONTEND_MENU );
+		fe.Update( 0.0f );
+
+		const HF_Ecs::Entity first = fe.GetMusicSlider();
+		FEAT_ASSERT( first != HF_Ecs::ENTITY_NULL );
+		fe.Input().SetFocused( first );
+
+		sysEvent_t stick;
+		memset( &stick, 0, sizeof( stick ) );
+		stick.evType = SE_JOYSTICK;
+		stick.evValue = AXIS_LEFT_Y;
+		stick.evValue2 = 100;
+		FEAT_ASSERT( fe.HandleSysEvent( stick ) );
+		const HF_Ecs::Entity moved = fe.Input().GetFocused();
+		FEAT_ASSERT( moved != HF_Ecs::ENTITY_NULL && moved != first );
+
+		FEAT_ASSERT( fe.HandleSysEvent( stick ) );	// consumed, but on cooldown
+		FEAT_ASSERT( fe.Input().GetFocused() == moved );
+		for ( int i = 0; i < 12; i++ ) { fe.Update( 1.0f / 60.0f ); }
+		FEAT_ASSERT( fe.Input().GetFocused() == moved );
+		FEAT_ASSERT( fe.HandleSysEvent( stick ) );	// cooldown expired: repeats
+		FEAT_ASSERT( fe.Input().GetFocused() != moved );
+
+		stick.evValue2 = 0;
+		FEAT_ASSERT( fe.HandleSysEvent( stick ) );
+		stick.evValue = AXIS_RIGHT_X;
+		stick.evValue2 = 100;
+		FEAT_ASSERT( !fe.HandleSysEvent( stick ) );	// right stick is not UI focus
+	}
+
+	int added = g_featFails - fc;
+	printf( "phase 18 frontend integration: %s\n", added ? "FAIL" : "ok" );
 }

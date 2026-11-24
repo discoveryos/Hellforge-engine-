@@ -297,7 +297,9 @@ void hfCommonLocal::ProcessGameReturn( const gameReturn_t & ret ) {
 		} else if ( !hfStr::Icmp( args.Argv(0), "devmap" ) ) {
 			MoveToNewMap( args.Argv( 1 ), true );
 		} else if ( !hfStr::Icmp( args.Argv(0), "died" ) ) {
-			if ( !IsMultiplayer() ) {
+			if ( uiFrontend != NULL ) {
+				uiFrontend->SetState( HF_Ui::hfUiFrontend::HF_UI_FRONTEND_RESULTS );
+			} else if ( !IsMultiplayer() ) {
 				game->Shell_Show( true );
 			}
 		} else if ( !hfStr::Icmp( args.Argv(0), "disconnect" ) ) {
@@ -340,10 +342,18 @@ void hfCommonLocal::Frame() {
 
 		eventLoop->RunEventLoop();
 
-		// Activate the shell if it's been requested
-		if ( showShellRequested && game ) {
-			game->Shell_Show( true );
+		// Activate a menu if one's been requested.  With the new frontend
+		// installed, a queued shell show becomes a pause/title transition;
+		// the legacy shell is only used when there is no frontend at all.
+		if ( showShellRequested ) {
 			showShellRequested = false;
+			if ( uiFrontend != NULL ) {
+				uiFrontend->SetState( mapSpawned
+					? HF_Ui::hfUiFrontend::HF_UI_FRONTEND_PAUSED
+					: HF_Ui::hfUiFrontend::HF_UI_FRONTEND_TITLE );
+			} else if ( game ) {
+				game->Shell_Show( true );
+			}
 		}
 
 		// if the console or another gui is down, we don't need to hold the mouse cursor

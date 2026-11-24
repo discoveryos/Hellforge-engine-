@@ -4,7 +4,17 @@
 #include "hfCommon_local.h"
 #include "../hflib/ui/hfUiFrontend.h"
 #include "../hflib/ui/hfUiSettings.h"
+#include "../hflib/game/hfArenaSave.h"
 #include "../renderer/hfUiDrawPass.h"
+
+// A real map is selected by the host, not baked into the UI.  When empty,
+// START falls back to the deterministic arena that ships with the frontend.
+static hfCVar ui_startMap( "ui_startMap", "", CVAR_ARCHIVE, "map to load when START is pressed" );
+static hfCVar ui_startDevMap( "ui_startDevMap", "0", CVAR_BOOL | CVAR_ARCHIVE, "load ui_startMap in developer mode" );
+
+// Engine-owned arena: the save/load policy has a concrete snapshot to write
+// when no real game module is installed (the harness and map-less checkouts).
+static HfArena						s_frontendArena;
 
 // Durable mirror of the options screen.  Loaded from the signed-in user's
 // console slot at boot; edits are written back and applied to live cvars.
@@ -100,8 +110,67 @@ void hfCommonLocal::OnStartHosting( hfMatchParameters & parms ) {
 }
 
 static void HF_FrontendActionHandler( int action, void * /*user*/ ) {
-	if ( action == HF_Ui::hfUiFrontend::HF_UI_ACTION_QUIT ) {
-		cmdSystem->BufferCommandText( CMD_EXEC_APPEND, "quit\n" );
+	using namespace HF_Ui;
+	// The handler is a free function, so reach the installed frontend through
+	// the engine singleton rather than the hfCommonLocal member name.
+	HF_Ui::hfUiFrontend *uiFrontend = commonLocal.GetFrontend();
+	if ( uiFrontend == NULL ) {
+		return;
+	}
+
+	switch ( action ) {
+		case hfUiFrontend::HF_UI_ACTION_QUIT:
+			cmdSystem->BufferCommandText( CMD_EXEC_APPEND, "quit\n" );
+			break;
+
+		case hfUiFrontend::HF_UI_ACTION_START: {
+			// Buffer the real map command instead of calling StartNewGame()
+			// from inside a UI update.  The session's LOADING state drives
+			// ExecuteMapChange(), which owns the LOADING -> PLAYING switch.
+			const char *mapName = ui_startMap.GetString();
+			if ( mapName != NULL && mapName[ 0 ] != '\0' ) {
+				char command[ 256 ];
+				snprintf( command, sizeof( command ), "%s %s\n",
+						  ui_startDevMap.GetBool() ? "devmap" : "map", mapName );
+				cmdSystem->BufferCommandText( CMD_EXEC_APPEND, command );
+				uiFrontend->SetState( hfUiFrontend::HF_UI_FRONTEND_LOADING );
+				uiFrontend->MarkHostHandled();
+			}
+			break;
+		}
+
+		case hfUiFrontend::HF_UI_ACTION_SAVE_SLOT_WRITE: {
+			hfArenaSave snapshot;
+			const int slot = uiFrontend->GetLastSaveSlot();
+			HfArena *arena = uiFrontend->GetArena();
+			hfconsole::hfConsoleServices *services = hfconsole::HfConsole_GetServices();
+			if ( arena == NULL || slot < 0 || services == NULL ) { break; }
+			snapshot.Capture( *arena );
+			if ( snapshot.SaveToSlot( services, services->GetUserId( 0 ),
+									  hfUiSaveSlots::SlotName( slot ) ) ) {
+				uiFrontend->SaveSlots().Refresh( *uiFrontend->RegistryPtr(), uiFrontend->System() );
+			}
+			break;
+		}
+
+		case hfUiFrontend::HF_UI_ACTION_SAVE_SLOT_LOAD: {
+			hfArenaSave snapshot;
+			const int slot = uiFrontend->GetLastSaveSlot();
+			HfArena *arena = uiFrontend->GetArena();
+			hfconsole::hfConsoleServices *services = hfconsole::HfConsole_GetServices();
+			if ( arena == NULL || slot < 0 || services == NULL ) { break; }
+			if ( snapshot.LoadFromSlot( services, services->GetUserId( 0 ),
+										hfUiSaveSlots::SlotName( slot ) )
+				&& snapshot.Restore( *arena ) ) {
+				uiFrontend->SetState( arena->gameOver
+									  ? hfUiFrontend::HF_UI_FRONTEND_RESULTS
+									  : hfUiFrontend::HF_UI_FRONTEND_PLAYING );
+			}
+			break;
+		}
+
+		default:
+			break;
 	}
 }
 
@@ -124,6 +193,8 @@ void hfCommonLocal::InitFrontend() {
 		h = ( float )renderSystem->GetHeight();
 	}
 	uiFrontend->Init( *uiEventBus, w, h );
+	uiFrontend->SetArena( &s_frontendArena );
+	s_frontendArena.Reset( 1 );
 	uiFrontend->SetActionHandler( HF_FrontendActionHandler, NULL );
 	hfUiDrawPass::SetSource( uiFrontend->RegistryPtr(), uiFrontend->SystemPtr() );
 
@@ -224,19 +295,7 @@ void hfCommonLocal::StartMenu( bool playIntro ) {
 			uiFrontend->SetState( HF_Ui::hfUiFrontend::HF_UI_FRONTEND_PAUSED );
 		}
 		console->Close();
-		return;
 	}
-
-	if ( game && game->Shell_IsActive() ) {
-		return;
-	}
-
-	if ( game ) {
-		game->Shell_Show( true );
-		game->Shell_SyncWithSession();
-	}
-
-	console->Close();
 }
 
 /*
@@ -296,7 +355,9 @@ bool hfCommonLocal::MenuEvent( const sysEvent_t * event ) {
 		}
 	}
 
-	if ( game && game->Shell_IsActive() ) {
+	// The new frontend owns menu input.  Only fall back to the legacy shell
+	// when no frontend is installed (e.g. a host that opts out at boot).
+	if ( uiFrontend == NULL && game && game->Shell_IsActive() ) {
 		return game->Shell_HandleGuiEvent( event );
 	}
 
@@ -313,7 +374,7 @@ hfCommonLocal::GuiFrameEvents
 =================
 */
 void hfCommonLocal::GuiFrameEvents() {
-	if ( game ) {
+	if ( uiFrontend == NULL && game ) {
 		game->Shell_SyncWithSession();
 	}
 	FrontendFrame();

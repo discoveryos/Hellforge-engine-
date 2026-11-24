@@ -268,3 +268,35 @@ architecture, never copy code.
   conflicting key rejected and a free key accepted.
   `phase 11 persistence: ok` → `ALL PASSED`, plain and `--headless`, default
   and Jolt (4/4 matrix). Both engine configs rebuilt with the frontend mounted.
+
+### Phase 18 — Frontend/host integration: real START, saves, presentation ✅
+- **Goal:** close the loop between the GUI state machine and the engine host —
+  a START press owns a real map load, SAVES writes a real payload, and the
+  presentation layer expresses theme font/focus/nine-patch data.
+- **Do:** `hfUiFrontend` gains `MarkHostHandled()`/`WasHostHandled()` so a host
+  action handler can claim START: `HF_FrontendActionHandler` sets LOADING and
+  buffers `map`/`devmap` (from `ui_startMap`/`ui_startDevMap`), and the frontend
+  no longer races the session by resetting the arena and jumping to PLAYING.
+  An engine-owned `HfArena` is attached so save slots have a real payload in
+  map-less checkouts. `hflib/game/hfArenaSave.h` adds a versioned compact text
+  snapshot (all `HfArena` fields/arrays, bit-pattern floats, field-wise
+  equality) with `SaveToSlot`/`LoadFromSlot` over the Phase 13 per-account
+  storage; save/load policy stays in the host handler.
+  Legacy shell paths in `hfCommon.cpp`, `hfcommon_frame.cpp` and
+  `hfCommon_menu.cpp` are guarded behind `uiFrontend == NULL`; `died` and
+  queued shell-shows route to RESULTS/PAUSED/TITLE on the new frontend while
+  `gameReturn_t.sessionCommand` map/devmap handling remains intact.
+  `hfUiTheme` adds `fontScale`, `focus`, `focusWidth` (parse/serialize/apply)
+  with `hfUiLabelComponent::baseScale` so repeated `Apply()` calls cannot
+  compound font scaling; `hfUiDrawPass` draws rounded/nine-patch panels from
+  `cornerRadius`/`borderWidth` using GL quads. `HandleSysEvent` accepts
+  `SE_JOYSTICK` left-stick input (`AXIS_LEFT_X`/`AXIS_LEFT_Y`) for focus
+  traversal with a frame-counted repeat cooldown, reset per state.
+- **Validate:** `Test_FrontendIntegration` — host-handled START keeps LOADING
+  and the arena untouched, fallback START still resets; arena snapshot text
+  round-trip, field-wise equality, deterministic resume, and console-slot
+  round-trip through the signed-in user; theme font/focus/nine-patch parse and
+  apply (including no compounding); and left-stick focus traversal with
+  repeat/cooldown plus right-stick rejection. `phase 18 frontend integration:
+  ok` → `ALL PASSED`, plain and `--headless`, default and Jolt (4/4 matrix).
+  Both engine binaries rebuilt; no build artifacts committed.

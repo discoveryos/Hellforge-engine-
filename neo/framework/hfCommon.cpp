@@ -1333,6 +1333,14 @@ hfCommonLocal::CreateMainMenu
 ========================
 */
 void hfCommonLocal::CreateMainMenu() {
+	// The Phase 16/17 frontend is the boot UI.  Bring it up before the legacy
+	// shell gets a chance to claim the screen, and keep the shell path only
+	// for hosts that explicitly opted out of the frontend.
+	InitFrontend();
+	if ( uiFrontend != NULL ) {
+		return;
+	}
+
 	if ( game != NULL ) {
 		// note which media we are going to need to load
 		declManager->BeginLevelLoad();

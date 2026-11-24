@@ -193,6 +193,7 @@ struct hfUiCanvasComponent {
 struct hfUiLabelComponent {
 	char	text[ 128 ];
 	float	scale;			// pixel scale multiplier applied to font metrics
+	float	baseScale;		// author scale before a theme's fontScale multiplier
 	float	r, g, b, a;
 	int		align;
 	bool	wrap;
@@ -206,6 +207,7 @@ struct hfUiLabelComponent {
 	HF_INLINE hfUiLabelComponent() {
 		text[ 0 ] = '\0';
 		scale = 1.0f;
+		baseScale = 1.0f;
 		r = g = b = a = 1.0f;
 		align = HF_UI_TEXT_LEFT;
 		wrap = false;

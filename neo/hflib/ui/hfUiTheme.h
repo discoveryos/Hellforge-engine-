@@ -17,8 +17,11 @@
 		button_normal      = 0.20,0.20,0.25,1.0
 		panel_border_width = 1.0
 		corner_radius      = 4.0
+		font_scale         = 1.15
+		focus              = 0.95,0.55,0.15,1.0
+		focus_width        = 2.0
 
-	Colors are r,g,b,a floats; the two geometry keys are floats.
+	Colors are r,g,b,a floats; the geometry keys are floats.
 
 	Apply() walks the registry and rewrites every widget component in place.
 	That is the whole point of a theme: a reskin touches no widget code, no
@@ -63,9 +66,12 @@ public:
 	hfUiThemeColor	sliderHandle;
 	hfUiThemeColor	toggleBox;
 	hfUiThemeColor	toggleCheck;
+	hfUiThemeColor	focus;
 
 	float			panelBorderWidth;
 	float			cornerRadius;
+	float			fontScale;
+	float			focusWidth;
 
 	hfUiTheme() {
 		SetDefaults();
@@ -88,9 +94,12 @@ public:
 		sliderHandle		= hfUiThemeColor( 0.80f, 0.80f, 0.80f, 1.00f );
 		toggleBox			= hfUiThemeColor( 0.25f, 0.25f, 0.30f, 1.00f );
 		toggleCheck			= hfUiThemeColor( 0.20f, 0.80f, 0.40f, 1.00f );
+		focus				= hfUiThemeColor( 0.95f, 0.55f, 0.15f, 1.00f );
 
 		panelBorderWidth	= 0.0f;
 		cornerRadius		= 0.0f;
+		fontScale			= 1.0f;
+		focusWidth			= 2.0f;
 	}
 
 	// --- text format ------------------------------------------------------
@@ -143,8 +152,11 @@ public:
 		AppendColor( out, maxSize, "slider_handle", sliderHandle );
 		AppendColor( out, maxSize, "toggle_box", toggleBox );
 		AppendColor( out, maxSize, "toggle_check", toggleCheck );
+		AppendColor( out, maxSize, "focus", focus );
 		AppendFloat( out, maxSize, "panel_border_width", panelBorderWidth );
 		AppendFloat( out, maxSize, "corner_radius", cornerRadius );
+		AppendFloat( out, maxSize, "font_scale", fontScale );
+		AppendFloat( out, maxSize, "focus_width", focusWidth );
 		return ( int )strlen( out );
 	}
 
@@ -189,6 +201,13 @@ public:
 			touched++;
 		} );
 
+		registry.Each< hfUiFocusComponent >( [ & ]( HF_Ecs::Entity entity, hfUiFocusComponent &f ) {
+			( void )entity;
+			f.r = focus.r; f.g = focus.g; f.b = focus.b; f.a = focus.a;
+			f.thickness = focusWidth > 0.0f ? focusWidth : 1.0f;
+			touched++;
+		} );
+
 		registry.Each< hfUiButtonComponent >( [ & ]( HF_Ecs::Entity entity, hfUiButtonComponent &b ) {
 			( void )entity;
 			b.normalR = buttonNormal.r;   b.normalG = buttonNormal.g;   b.normalB = buttonNormal.b;   b.normalA = buttonNormal.a;
@@ -214,10 +233,12 @@ public:
 
 		registry.Each< hfUiLabelComponent >( [ & ]( HF_Ecs::Entity entity, hfUiLabelComponent &l ) {
 			( void )entity;
-			// Large labels are headings: give them the accent so a theme keeps
-			// the title/result hierarchy instead of flattening every label.
-			const hfUiThemeColor &c = ( l.scale >= 2.0f ) ? accent : text;
+			// Large labels are headings: use the author's base scale so a
+			// global font-scale change does not silently reclassify them.
+			const hfUiThemeColor &c = ( l.baseScale >= 2.0f ) ? accent : text;
 			l.r = c.r; l.g = c.g; l.b = c.b; l.a = c.a;
+			const float base = l.baseScale > 0.0f ? l.baseScale : l.scale;
+			l.scale = base * ( fontScale > 0.0f ? fontScale : 1.0f );
 			touched++;
 		} );
 
@@ -271,6 +292,7 @@ private:
 		else if ( strcmp( key, "slider_handle" ) == 0 ) { target = &sliderHandle; }
 		else if ( strcmp( key, "toggle_box" ) == 0 ) { target = &toggleBox; }
 		else if ( strcmp( key, "toggle_check" ) == 0 ) { target = &toggleCheck; }
+		else if ( strcmp( key, "focus" ) == 0 ) { target = &focus; }
 		if ( target == NULL ) { return false; }
 		return ParseColorValue( value, *target );
 	}
@@ -282,6 +304,14 @@ private:
 		}
 		if ( strcmp( key, "corner_radius" ) == 0 ) {
 			cornerRadius = ( float )atof( value );
+			return true;
+		}
+		if ( strcmp( key, "font_scale" ) == 0 ) {
+			fontScale = ( float )atof( value );
+			return true;
+		}
+		if ( strcmp( key, "focus_width" ) == 0 ) {
+			focusWidth = ( float )atof( value );
 			return true;
 		}
 		return false;

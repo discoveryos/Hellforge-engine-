@@ -83,6 +83,53 @@ static void BlitCoverage( const HF_Ui::hfUiCoverage &cov ) {
 	qglBindTexture( GL_TEXTURE_2D, 0 );
 }
 
+// Rounded/nine-patch panel approximation.  A rounded box is assembled from
+// the centre cell, four edge cells and four inset corner cells.  Keeping the
+// construction as quads means it works on the same GL path as the rest of the
+// overlay (and stays a no-op in headless mode).
+static void DrawQuad( float x, float y, float w, float h ) {
+	if ( w <= 0.0f || h <= 0.0f ) {
+		return;
+	}
+	qglBegin( GL_QUADS );
+	qglVertex2f( x, y );
+	qglVertex2f( x + w, y );
+	qglVertex2f( x + w, y + h );
+	qglVertex2f( x, y + h );
+	qglEnd();
+}
+
+static void DrawRoundedFill( float x, float y, float w, float h, float radius,
+							 float r, float g, float b, float a ) {
+	if ( w <= 0.0f || h <= 0.0f || a <= 0.0f ) {
+		return;
+	}
+	GL_Color( r, g, b, a );
+	if ( radius <= 0.5f ) {
+		DrawQuad( x, y, w, h );
+		return;
+	}
+	if ( radius > w * 0.5f ) { radius = w * 0.5f; }
+	if ( radius > h * 0.5f ) { radius = h * 0.5f; }
+
+	const float innerX = x + radius;
+	const float innerY = y + radius;
+	const float innerW = w - radius * 2.0f;
+	const float innerH = h - radius * 2.0f;
+
+	DrawQuad( innerX, innerY, innerW, innerH );				// centre
+	DrawQuad( innerX, y, innerW, radius );					// top
+	DrawQuad( innerX, y + h - radius, innerW, radius );		// bottom
+	DrawQuad( x, innerY, radius, innerH );					// left
+	DrawQuad( x + w - radius, innerY, radius, innerH );		// right
+
+	const float c = radius * 0.45f;
+	DrawQuad( x + radius - c, y + radius - c, c * 2.0f, c * 2.0f );
+	DrawQuad( x + w - radius - c, y + radius - c, c * 2.0f, c * 2.0f );
+	DrawQuad( x + radius - c, y + h - radius - c, c * 2.0f, c * 2.0f );
+	DrawQuad( x + w - radius - c, y + h - radius - c, c * 2.0f, c * 2.0f );
+}
+
 void hfUiDrawPass::SetSource( HF_Ecs::Registry *registry, HF_Ui::hfUiSystem *uiSystem ) {
 	s_registry = registry;
 	s_system = uiSystem;
@@ -162,16 +209,25 @@ void hfUiDrawPass::Draw( HF_Ecs::Registry &registry, HF_Ui::hfUiSystem &uiSystem
 		
 		if ( visible.Empty() ) continue;
 		
-		// Panel background
+		// Panel background.  borderWidth/cornerRadius turn the flat quad into
+		// a nine-patch-style rounded panel without any texture resources.
 		const HF_Ui::hfUiPanelComponent *panel = registry.GetComponent< HF_Ui::hfUiPanelComponent >( ent );
 		if ( panel && panel->a > 0.0f ) {
-			GL_Color( panel->r, panel->g, panel->b, panel->a );
-			qglBegin( GL_QUADS );
-			qglVertex2f( visible.x, visible.y );
-			qglVertex2f( visible.x + visible.w, visible.y );
-			qglVertex2f( visible.x + visible.w, visible.y + visible.h );
-			qglVertex2f( visible.x, visible.y + visible.h );
-			qglEnd();
+			const float border = panel->borderWidth > 0.0f ? panel->borderWidth : 0.0f;
+			if ( border > 0.0f && panel->borderA > 0.0f ) {
+				DrawRoundedFill( visible.x, visible.y, visible.w, visible.h, panel->cornerRadius,
+								 panel->borderR, panel->borderG, panel->borderB, panel->borderA );
+				float inset = border;
+				const float maxInset = ( visible.w < visible.h ? visible.w : visible.h ) * 0.5f;
+				if ( inset > maxInset ) { inset = maxInset; }
+				const float innerRadius = panel->cornerRadius > inset ? panel->cornerRadius - inset : 0.0f;
+				DrawRoundedFill( visible.x + inset, visible.y + inset,
+								 visible.w - inset * 2.0f, visible.h - inset * 2.0f,
+								 innerRadius, panel->r, panel->g, panel->b, panel->a );
+			} else {
+				DrawRoundedFill( visible.x, visible.y, visible.w, visible.h, panel->cornerRadius,
+								 panel->r, panel->g, panel->b, panel->a );
+			}
 		}
 		
 		// Button

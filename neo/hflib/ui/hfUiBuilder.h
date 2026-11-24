@@ -59,6 +59,7 @@ public:
 		hfUiLabelComponent &l = reg.AddComponent< hfUiLabelComponent >( e );
 		l.SetText( text );
 		l.scale = scale;
+		l.baseScale = scale;
 		l.r=r; l.g=g; l.b=b; l.a=a;
 		l.visible = true;
 		l.wrap = false;
@@ -86,6 +87,7 @@ public:
 		hfUiLabelComponent &l = reg.AddComponent< hfUiLabelComponent >( lbl );
 		l.SetText( text );
 		l.scale = 1.0f;
+		l.baseScale = 1.0f;
 		l.r=l.g=l.b=l.a = 1.0f;
 		l.align = HF_UI_TEXT_CENTER;
 		
@@ -129,6 +131,7 @@ public:
 		hfUiLabelComponent &l = reg.AddComponent< hfUiLabelComponent >( lbl );
 		l.SetText( text );
 		l.scale = 1.0f;
+		l.baseScale = 1.0f;
 		l.r=l.g=l.b=l.a = 1.0f;
 		
 		return e;

@@ -102,6 +102,9 @@ public:
 		m_seed = 1;
 		m_arenaAccum = 0.0f;
 		m_quitRequested = false;
+		m_hostHandled = false;
+		m_joyRepeatCooldown = 0;
+		m_joyAxis[ 0 ] = m_joyAxis[ 1 ] = 0;
 		m_bindCount = 0;
 		m_logCount = 0;
 		m_root = HF_Ecs::ENTITY_NULL;
@@ -140,6 +143,9 @@ public:
 		m_bindCount = 0;
 		m_bus = NULL;
 		m_state = HF_UI_FRONTEND_BOOT;
+		m_hostHandled = false;
+		m_joyRepeatCooldown = 0;
+		m_joyAxis[ 0 ] = m_joyAxis[ 1 ] = 0;
 		m_root = HF_Ecs::ENTITY_NULL;
 		m_resultLabel = HF_Ecs::ENTITY_NULL;
 		m_pendingBindRow = -1;
@@ -151,6 +157,7 @@ public:
 	// --- host wiring -----------------------------------------------------
 
 	void SetArena( HfArena *arena ) { m_arena = arena; }
+	HfArena *			GetArena() const { return m_arena; }
 	HF_Ecs::Registry *	RegistryPtr() { return &m_registry; }
 	hfUiSystem *		SystemPtr() { return &m_ui; }
 	hfUiSystem &		System() { return m_ui; }
@@ -216,6 +223,14 @@ public:
 		m_actionUser = user;
 	}
 
+	// A host handler calls this when it has taken over an action.  START is
+	// the important case: a real map load owns the LOADING -> PLAYING
+	// transition, so the frontend must not reset its arena and jump straight
+	// to PLAYING behind the host's back.  The flag is cleared at the start of
+	// every action, so it cannot leak into a later button press.
+	void MarkHostHandled() { m_hostHandled = true; }
+	bool WasHostHandled() const { return m_hostHandled; }
+
 	// --- action log (deterministic; what the harness compares) ------------
 
 	int		GetActionLogCount() const { return m_logCount; }
@@ -240,6 +255,8 @@ public:
 		m_state = state;
 		m_pendingAction = HF_UI_ACTION_NONE;
 		m_arenaAccum = 0.0f;
+		m_joyRepeatCooldown = 0;
+		m_joyAxis[ 0 ] = m_joyAxis[ 1 ] = 0;
 
 		// One registry per frontend, cleared per screen: cheap, leak-free and
 		// it invalidates every stale entity reference in one step.
@@ -280,13 +297,16 @@ public:
 			return;
 		}
 		LogAction( action );
+		m_hostHandled = false;
 		if ( m_actionHandler != NULL ) {
 			m_actionHandler( action, m_actionUser );
 		}
 
 		switch ( action ) {
 			case HF_UI_ACTION_START:
-				BeginGame();
+				if ( !m_hostHandled ) {
+					BeginGame();
+				}
 				break;
 			case HF_UI_ACTION_OPTIONS:
 				SetState( HF_UI_FRONTEND_MENU );
@@ -390,6 +410,19 @@ public:
 				}
 				return false;
 			}
+			case SE_JOYSTICK: {
+				// Win32 queues SE_JOYSTICK with a zero-based axis number and a
+				// signed percent, not a J_* key code.  Only the left stick
+				// navigates the UI; the right stick stays with the game.
+				const int axis = ( ev.evValue == AXIS_LEFT_X ) ? 0
+							   : ( ev.evValue == AXIS_LEFT_Y ) ? 1 : -1;
+				if ( axis < 0 ) { return false; }
+				if ( m_joyAxis[ axis ] != ev.evValue2 ) {
+					m_joyRepeatCooldown = 0;
+				}
+				m_joyAxis[ axis ] = ev.evValue2;
+				return ApplyJoystickFocus();
+			}
 			default:
 				return false;
 		}
@@ -411,6 +444,12 @@ public:
 
 	void Update( float dt ) {
 		m_ui.Update( m_registry, dt );
+
+		if ( m_joyRepeatCooldown > 0 ) {
+			m_joyRepeatCooldown--;
+		} else if ( m_state != HF_UI_FRONTEND_PLAYING ) {
+			ApplyJoystickFocus();	// repeat a held stick at a fixed cadence
+		}
 
 		if ( m_bus != NULL ) {
 			m_input.Update( m_registry, m_ui, *m_bus );
@@ -516,6 +555,31 @@ private:
 				m_fullscreen = ev->valueI != 0;
 			}
 		}
+	}
+
+	// Held-stick navigation.  The cooldown is frame-counted rather than
+	// wall-clock based so a fixed input sequence produces the same focus path
+	// in a headless test as it does in the windowed engine.
+	bool ApplyJoystickFocus() {
+		if ( m_bus == NULL || m_joyRepeatCooldown > 0 ) {
+			return true;
+		}
+		static const int DEADZONE = 40;
+		const int ax = m_joyAxis[ 0 ] < 0 ? -m_joyAxis[ 0 ] : m_joyAxis[ 0 ];
+		const int ay = m_joyAxis[ 1 ] < 0 ? -m_joyAxis[ 1 ] : m_joyAxis[ 1 ];
+		int dx = 0;
+		int dy = 0;
+		if ( ax >= ay && ax > DEADZONE ) {
+			dx = ( m_joyAxis[ 0 ] > 0 ) ? 1 : -1;
+		} else if ( ay > DEADZONE ) {
+			dy = ( m_joyAxis[ 1 ] > 0 ) ? 1 : -1;
+		}
+		if ( dx != 0 || dy != 0 ) {
+			if ( m_input.MoveFocus( m_registry, m_ui, *m_bus, dx, dy ) ) {
+				m_joyRepeatCooldown = 12;
+			}
+		}
+		return true;
 	}
 
 	int FindBoundAction( HF_Ecs::Entity entity ) const {
@@ -847,6 +911,9 @@ private:
 	int					m_seed;
 	float				m_arenaAccum;
 	bool				m_quitRequested;
+	bool				m_hostHandled;
+	int					m_joyRepeatCooldown;
+	int					m_joyAxis[ 2 ];
 	float				m_mouseX = 0.0f;
 	float				m_mouseY = 0.0f;
 

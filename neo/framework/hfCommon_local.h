@@ -219,6 +219,9 @@ public:	// These are public because they are called directly by static functions
 
 	hfUserCmdMgr & GetUCmdMgr() { return userCmdMgr; }
 
+	// Public for static action handlers (see hfCommon_menu.cpp).
+	HF_Ui::hfUiFrontend * GetFrontend() const { return uiFrontend; }
+
 private:
 	bool						com_fullyInitialized;
 	bool						com_refreshOnPrint;		// update the screen every print for dmap

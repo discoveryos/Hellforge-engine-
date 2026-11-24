@@ -2104,6 +2104,66 @@ Slot keys are `save1`, `save2`, … so they stay stable across runs.
 Harness output: `phase 11 persistence: ok` → `ALL PASSED`, plain and
 `--headless`, default and Jolt.
 
+## 26. Phase 18 — Frontend/host integration: real START, saves, presentation
+
+Phase 17 gave the GUI durable state; Phase 18 closes the loop with the engine
+host. Everything below is header-only or plain data, so it is exercised in the
+headless harness and linked into both engine configs.
+
+### Host-owned START policy
+
+`hfUiFrontend::MarkHostHandled()` lets an action handler claim an action. For
+START, `HF_FrontendActionHandler` in `hfCommon_menu.cpp`:
+
+- buffers `map`/`devmap` from the `ui_startMap` / `ui_startDevMap` cvars
+  (an empty `ui_startMap` keeps the deterministic arena fallback),
+- sets the frontend to LOADING and marks the action handled,
+
+so the frontend no longer resets the arena and jumps straight to PLAYING while
+the session is still loading a map. The host flag is cleared per action, so a
+later unhandled START still exercises the fallback path.
+
+### Real save payloads
+
+`hflib/game/hfArenaSave.h` is a versioned compact text snapshot of every
+mutable `HfArena` field (including enemy/bullet arrays and RNG state). Floats
+are serialized as 32-bit bit patterns for an exact round trip on a given
+binary; equality is field-wise because the engine's `HfArenaEnemy` /
+`HfArenaBullet` structs carry tail padding that is not part of the payload.
+`SaveToSlot`/`LoadFromSlot` write through the Phase 13 per-account console
+slots (`save1`..`save3` from the SAVES screen). The engine attaches an
+engine-owned `HfArena` at boot so map-less checkouts still have a real payload,
+and save/load policy stays in the host handler, not the widget layer.
+
+### Legacy shell retirement
+
+`CreateMainMenu()` now initializes the new frontend first and skips the legacy
+shell when it is installed. Remaining shell calls in menu input, frame events
+and GUI sync are guarded behind `uiFrontend == NULL`; `died` and queued shell
+shows route to RESULTS / PAUSED / TITLE on the frontend. The
+`gameReturn_t.sessionCommand` map/devmap path is unchanged.
+
+### Presentation: fonts, focus, nine-patch
+
+`hfUiTheme` adds `fontScale`, `focus` color and `focusWidth` with text
+parse/serialize and `Apply()` support. `hfUiLabelComponent::baseScale` keeps
+the author scale separate from the applied scale so repeated theme applies do
+not compound. `hfUiDrawPass` assembles rounded/nine-patch panel fills from
+`cornerRadius` / `borderWidth` with GL quads (a no-op under `--headless`).
+`HandleSysEvent` accepts `SE_JOYSTICK` left-stick (`AXIS_LEFT_X` /
+`AXIS_LEFT_Y`) focus traversal with a frame-counted repeat cooldown, reset on
+every state transition; right-stick axes are ignored.
+
+### Harness coverage
+
+`Test_FrontendIntegration` in `hfstest_features.cpp` asserts: host-handled
+START stays in LOADING with the arena untouched (and the unhandled fallback
+still resets); arena snapshot text + console-slot round-trip with field-wise
+equality and deterministic resume; theme font/focus/nine-patch parse/apply
+without compounding; and left-stick focus traversal with repeat, cooldown and
+right-stick rejection. Output: `phase 18 frontend integration: ok` → `ALL
+PASSED`, plain and `--headless`, default and Jolt (4/4 matrix).
+
 ### Known gaps
 
 - **Cvar application is a snapshot, not a live preview.** Settings are applied
@@ -2113,20 +2173,8 @@ Harness output: `phase 11 persistence: ok` → `ALL PASSED`, plain and
   with primary-key buttons; a click captures the next key, shows conflicts,
   and Escape cancels. Secondary bindings, gamepad binds and per-action paging
   are not exposed yet.
-- **Save/load policy is host-owned.** The frontend now has a SAVES state/screen
-  built from `hfUiSaveSlots`; slot delete has a default refresh, but actual
-  save/load payloads are still game policy.
-- **The theme has no font or nine-patch yet.** Colours and two geometry knobs
-  are what the current draw pass can express; a glyph atlas and stretchable
-  borders need draw-pass work.
-- **Input coverage is partial.** Slider drag uses pointer capture, focus is
-  mirrored into `hfUiFocusComponent` and drawn as a ring by `hfUiDrawPass`,
-  and arrow/D-pad/TAB traversal is wired through `HandleSysEvent`; analog
-  stick traversal is still minimal.
-- **Menu/desktop input is now partially unified.** `hfCommonLocal` owns an
-  `hfUiFrontend` + `HF_Ecs::EventBus`, initializes it at boot, installs it as
-  the `hfUiDrawPass` source, and routes `Sys_*` events through
-  `HandleSysEvent` when the frontend is in a menu/pause/results state. Boot now
-  lands on the frontend TITLE screen; in-game ESC hands off to the frontend
-  PAUSED state. Full game-start wiring (START action -> real map load) and
-  retirement of the legacy shell remain follow-up work.
+- **Real map start cannot be end-to-end tested here.** The checkout has no
+  `.map` assets and no game DLL, so START falls back to the deterministic
+  arena; `ui_startMap` is how a shipped build selects a real map.
+- **Theme visuals are approximate.** The nine-patch is a quad-based rounded
+  fill rather than a textured atlas, and glyph atlases remain future work.
