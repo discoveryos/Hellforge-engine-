@@ -2204,3 +2204,9 @@ the renderer translation unit is intentionally not linked there.
 sampling only happens in PLAYING (and never consumes console/pause keys), and
 that the save schema manifest round-trips. `ALL PASSED`, plain and
 `--headless`, default and Jolt (4/4 matrix). Both engine binaries rebuilt.
+
+### Documentation
+
+The practical how-to for this render/UI path now lives in `guide/README.md`,
+with UI/input details in `guide/06-ui-and-input.md`, the headless-safe draw
+gate in `guide/08-tests.md`, and render gotchas in `guide/10-gotchas.md`.

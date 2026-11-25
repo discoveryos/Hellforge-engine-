@@ -321,3 +321,12 @@ gameplay work began:
   manifest, per-field equality and v1-with-unknown-key parsing. `ALL PASSED`,
   plain and `--headless`, default and Jolt (4/4 matrix). Both engine binaries
   rebuilt; no build artifacts committed.
+
+### Documentation — complete guide (`guide/`) ✅
+
+A full beginner-to-advanced guide was added in `guide/`: build (plain, Jolt,
+optional CPython, Windows), running and controls, hfscript dialects and the
+`arena_*` hosts, C++ game-making (sim extension and game module API), UI/input
+and the draw-pass gate, per-account persistence, the 4-way test matrix, the
+first-game plan, gotchas and a symbol/file reference. Start at
+`guide/README.md`.
