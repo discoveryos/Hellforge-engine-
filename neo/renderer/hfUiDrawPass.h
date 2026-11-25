@@ -5,6 +5,7 @@
 #include "../hflib/ui/hfUiSystem.h"
 #include "../hflib/ui/hfUiWidget.h"
 #include "../hflib/ui/hfBitmapFont.h"
+#include "../hflib/game/hfArena.h"
 
 /*
 ===============================================================================
@@ -34,6 +35,19 @@ public:
 	static void	ClearSource();
 	static bool	HasSource();
 
+	// Gameplay overlay ownership.  The host installs the live arena once and
+	// flips the enabled flag from the frontend state every frame; the overlay
+	// can only draw when both are present.  Pure so tests can pin the policy
+	// without a GL context.
+	static void	SetGameplayOverlay( HfArena *arena ) { s_arena = arena; }
+	static void	SetGameplayOverlayEnabled( bool enabled ) { s_gameplayOverlayEnabled = enabled; }
+	static bool	ShouldDrawGameplayOverlay();
+	// Pure form of the ownership policy so the headless harness can pin it
+	// without linking the renderer translation unit.
+	static bool	GameplayOverlayGate( bool enabled, bool hasArena, bool hasSource ) {
+		return enabled && hasArena && hasSource;
+	}
+
 	// Called by the backend after the frame's views.  Safe to call when
 	// nothing is installed, in headless mode, or before the renderer exists.
 	static void	DrawInstalled();
@@ -41,6 +55,8 @@ public:
 private:
 	static HF_Ecs::Registry *		s_registry;
 	static HF_Ui::hfUiSystem *		s_system;
+	static HfArena *				s_arena;
+	static bool						s_gameplayOverlayEnabled;
 };
 
 #endif

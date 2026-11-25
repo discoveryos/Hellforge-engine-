@@ -36,6 +36,27 @@ struct HfArenaBullet {
 	int		life;
 };
 
+// One frame of intent from the host.  Kept as plain data so it can travel
+// through the UI, hfscript or a deterministic replay without owning any
+// platform input state.  The sim consumes a command; it never stores one.
+struct HfArenaInput {
+	float	moveX;		// -1..1
+	float	moveY;		// -1..1
+	float	aimX;		// direction to aim target (need not be normalized)
+	float	aimY;
+	bool	fire;
+	bool	dodge;
+
+	HF_INLINE void Clear() {
+		moveX = moveY = 0.0f;
+		aimX = 0.0f; aimY = -1.0f;
+		fire = false;
+		dodge = false;
+	}
+
+	HF_INLINE HfArenaInput() { Clear(); }
+};
+
 struct HfArena {
 	enum {
 		MAX_ENEMIES		= 32,

@@ -197,6 +197,7 @@ void hfCommonLocal::InitFrontend() {
 	s_frontendArena.Reset( 1 );
 	uiFrontend->SetActionHandler( HF_FrontendActionHandler, NULL );
 	hfUiDrawPass::SetSource( uiFrontend->RegistryPtr(), uiFrontend->SystemPtr() );
+	hfUiDrawPass::SetGameplayOverlay( uiFrontend->GetArena() );
 
 	hfconsole::hfConsoleServices *services = hfconsole::HfConsole_GetServices();
 	const hfconsole::hfConsoleUserId user = ( services != NULL ) ? services->GetUserId( 0 )
@@ -248,6 +249,11 @@ void hfCommonLocal::FrontendFrame() {
 	}
 	// Advance the frontend (fixed-step sim happens inside when PLAYING).
 	uiFrontend->Update( 1.0f / 60.0f );
+
+	// The renderer may draw the arena layer only while PLAYING.  Deriving the
+	// gate from the frontend state here keeps ownership in one place.
+	hfUiDrawPass::SetGameplayOverlayEnabled(
+		uiFrontend->GetState() == HF_Ui::hfUiFrontend::HF_UI_FRONTEND_PLAYING );
 
 	// Options edits are durable and take effect live.  Compare against the
 	// last applied mirror so a drag writes once per changed value, not every
@@ -345,7 +351,11 @@ bool hfCommonLocal::MenuEvent( const sysEvent_t * event ) {
 				return true;
 			}
 		} else if ( s == HF_Ui::hfUiFrontend::HF_UI_FRONTEND_PLAYING ) {
-			// In-game: only let frontend handle pause/back keys.
+			// In-game: sample gameplay intent first.  HandleGameInput leaves
+			// console/pause keys alone, so those still reach the host below.
+			if ( uiFrontend->HandleGameInput( *event ) ) {
+				return true;
+			}
 			if ( event->evType == SE_KEY && event->evValue2 == 1
 				&& ( event->evValue == K_ESCAPE || event->evValue == K_JOY9 ) ) {
 				if ( uiFrontend->HandleSysEvent( *event ) ) {

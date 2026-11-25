@@ -2178,3 +2178,29 @@ PASSED`, plain and `--headless`, default and Jolt (4/4 matrix).
   arena; `ui_startMap` is how a shipped build selects a real map.
 - **Theme visuals are approximate.** The nine-patch is a quad-based rounded
   fill rather than a textured atlas, and glyph atlases remain future work.
+
+## 27. Twin-stick arena overlay (pre-phase-1 risk mitigation)
+
+The gameplay layer stays inside `hfUiDrawPass` rather than introducing a new
+scene path: world coordinates (±120) map to a centred viewport square and the
+player, enemies and bullets are emitted as plain GL quads, drawn before the
+registry's HUD so overlays never cover the controls. No textures or assets are
+required and headless runs short-circuit before touching GL.
+
+Ownership is an explicit three-part contract:
+
+1. `SetSource()` installs the live registry/UI pair (existing contract).
+2. `SetGameplayOverlay()` installs the engine-owned `HfArena` once at boot.
+3. `SetGameplayOverlayEnabled()` is derived from the frontend state every
+   frame in `FrontendFrame()`; it is false outside PLAYING.
+
+`ShouldDrawGameplayOverlay()` delegates to the pure `GameplayOverlayGate(
+enabled, hasArena, hasSource )`, which the headless harness tests directly —
+the renderer translation unit is intentionally not linked there.
+
+### Verification
+
+`Test_RiskMitigations()` asserts the full gate truth table, that gameplay input
+sampling only happens in PLAYING (and never consumes console/pause keys), and
+that the save schema manifest round-trips. `ALL PASSED`, plain and
+`--headless`, default and Jolt (4/4 matrix). Both engine binaries rebuilt.

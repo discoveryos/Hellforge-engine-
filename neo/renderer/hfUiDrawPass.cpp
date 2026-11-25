@@ -7,6 +7,8 @@
 
 HF_Ecs::Registry *	hfUiDrawPass::s_registry = NULL;
 HF_Ui::hfUiSystem *	hfUiDrawPass::s_system = NULL;
+HfArena *			hfUiDrawPass::s_arena = NULL;
+bool					hfUiDrawPass::s_gameplayOverlayEnabled = false;
 
 // Text overlay scratch: the labels are rasterized into an 8-bit coverage
 // buffer and uploaded as a single intensity texture.  One upload per frame is
@@ -130,6 +132,36 @@ static void DrawRoundedFill( float x, float y, float w, float h, float radius,
 	DrawQuad( x + w - radius - c, y + h - radius - c, c * 2.0f, c * 2.0f );
 }
 
+// Minimal arena overlay: the deterministic sim's ±120 world box is mapped to
+// a centred square of the UI viewport.  This is intentionally plain quads —
+// it needs no assets and is a no-op in headless mode.  Ownership is explicit:
+// it draws only when the host installed an arena AND enabled it for PLAYING.
+static void DrawArenaOverlay( const HfArena &arena, float viewportW, float viewportH ) {
+	const float side = viewportW < viewportH ? viewportW : viewportH;
+	const float scale = side / 280.0f;		// ±120 world units plus margin
+	const float ox = viewportW * 0.5f;
+	const float oy = viewportH * 0.5f;
+
+	// Arena bounds.
+	GL_Color( 0.25f, 0.27f, 0.34f, 1.0f );
+	DrawQuad( ox - 120.0f * scale, oy - 120.0f * scale, 240.0f * scale, 240.0f * scale );
+
+	GL_Color( 1.0f, 0.75f, 0.15f, 1.0f );
+	DrawQuad( ox + arena.playerX * scale - 3.0f, oy + arena.playerY * scale - 3.0f, 6.0f, 6.0f );
+
+	GL_Color( 0.85f, 0.20f, 0.20f, 1.0f );
+	for ( int i = 0; i < arena.enemyCount; i++ ) {
+		DrawQuad( ox + arena.enemies[ i ].x * scale - 2.5f,
+				  oy + arena.enemies[ i ].y * scale - 2.5f, 5.0f, 5.0f );
+	}
+
+	GL_Color( 0.95f, 0.95f, 0.65f, 1.0f );
+	for ( int i = 0; i < arena.bulletCount; i++ ) {
+		DrawQuad( ox + arena.bullets[ i ].x * scale - 1.0f,
+				  oy + arena.bullets[ i ].y * scale - 1.0f, 2.0f, 2.0f );
+	}
+}
+
 void hfUiDrawPass::SetSource( HF_Ecs::Registry *registry, HF_Ui::hfUiSystem *uiSystem ) {
 	s_registry = registry;
 	s_system = uiSystem;
@@ -138,10 +170,16 @@ void hfUiDrawPass::SetSource( HF_Ecs::Registry *registry, HF_Ui::hfUiSystem *uiS
 void hfUiDrawPass::ClearSource() {
 	s_registry = NULL;
 	s_system = NULL;
+	s_arena = NULL;
+	s_gameplayOverlayEnabled = false;
 }
 
 bool hfUiDrawPass::HasSource() {
 	return s_registry != NULL && s_system != NULL;
+}
+
+bool hfUiDrawPass::ShouldDrawGameplayOverlay() {
+	return GameplayOverlayGate( s_gameplayOverlayEnabled, s_arena != NULL, HasSource() );
 }
 
 void hfUiDrawPass::DrawInstalled() {
@@ -196,6 +234,11 @@ void hfUiDrawPass::Draw( HF_Ecs::Registry &registry, HF_Ui::hfUiSystem &uiSystem
 	GL_State( GLS_DEPTHFUNC_ALWAYS | GLS_SRCBLEND_SRC_ALPHA | GLS_DSTBLEND_ONE_MINUS_SRC_ALPHA ); qglDisable( GL_DEPTH_TEST );
 	GL_Cull( CT_TWO_SIDED );
 	qglDisable( GL_TEXTURE_2D );
+
+	// Gameplay layer first so the HUD drawn from the registry stays on top.
+	if ( ShouldDrawGameplayOverlay() ) {
+		DrawArenaOverlay( *s_arena, ( float )renderSystem->GetWidth(), ( float )renderSystem->GetHeight() );
+	}
 	
 	for ( int d = 0; d < drawCount; d++ ) {
 		HF_Ecs::Entity ent = uiSystem.GetDrawEntity( d );

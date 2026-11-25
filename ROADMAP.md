@@ -300,3 +300,24 @@ architecture, never copy code.
   repeat/cooldown plus right-stick rejection. `phase 18 frontend integration:
   ok` → `ALL PASSED`, plain and `--headless`, default and Jolt (4/4 matrix).
   Both engine binaries rebuilt; no build artifacts committed.
+
+### Twin-stick arena — pre-phase-1 risk mitigation ✅
+
+The first-game design in `docs/twin-stick-arena-design.md` was de-risked before
+gameplay work began:
+
+- `HfArenaInput` is a plain command POD; `hfUiFrontend::HandleGameInput()`
+  samples WASD/mouse/sticks only in PLAYING and leaves `K_GRAVE`, `K_ESCAPE`
+  and `K_JOY9` to the host. `hfCommonLocal::MenuEvent()` routes the PLAYING
+  path, and commands reset on every state transition.
+- `hfUiDrawPass` requires an installed source, an installed arena and a
+  frontend-derived enabled flag before drawing its quad arena overlay under
+  the HUD. `GameplayOverlayGate()` is pure so headless tests pin the policy
+  without linking the renderer.
+- `hfArenaSave::FieldKeys()` + `SchemaRoundTrip()` guard the save manifest;
+  field-wise `Equals()` (not `memcmp`) stays mandatory due to struct padding.
+- **Validate:** `Test_RiskMitigations()` — gameplay input sampling and
+  reserved-key pass-through, pause reset, pure draw-gate truth table, schema
+  manifest, per-field equality and v1-with-unknown-key parsing. `ALL PASSED`,
+  plain and `--headless`, default and Jolt (4/4 matrix). Both engine binaries
+  rebuilt; no build artifacts committed.

@@ -144,6 +144,34 @@ struct hfArenaSave {
 
 	// --- text format ------------------------------------------------------
 
+	// Single source of truth for the on-disk schema.  A future field must be
+	// added here as well as to Serialize/Parse/Restore/Equals; the harness
+	// walks this list so an omission cannot silently ship.
+	static const char * const * FieldKeys( int &count ) {
+		static const char * const keys[] = {
+			"version", "player_x", "player_y", "hit_points", "score",
+			"wave", "ticks", "game_over", "won", "enemy_count",
+			"bullet_count", "fire_cooldown", "intent", "rng",
+			"enemies", "bullets"
+		};
+		count = ( int )( sizeof( keys ) / sizeof( keys[ 0 ] ) );
+		return keys;
+	}
+
+	// Cheap self-check used by tests: every declared key must appear in the
+	// serialized text, and the text must restore to an equal snapshot.
+	bool SchemaRoundTrip() const {
+		char text[ HF_ARENA_SAVE_TEXT_MAX ];
+		if ( Serialize( text, sizeof( text ) ) <= 0 ) { return false; }
+		int count = 0;
+		const char * const * keys = FieldKeys( count );
+		for ( int i = 0; i < count; i++ ) {
+			if ( strstr( text, keys[ i ] ) == NULL ) { return false; }
+		}
+		hfArenaSave parsed;
+		return parsed.Parse( text ) && parsed.Equals( *this );
+	}
+
 	int Serialize( char *out, int maxSize ) const {
 		if ( out == NULL || maxSize <= 0 ) { return 0; }
 		out[ 0 ] = '\0';

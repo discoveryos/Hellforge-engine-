@@ -99,6 +99,7 @@ public:
 		m_pendingAction = HF_UI_ACTION_NONE;
 		m_width = 1024.0f;
 		m_height = 768.0f;
+		ResetGameInput();
 		m_seed = 1;
 		m_arenaAccum = 0.0f;
 		m_quitRequested = false;
@@ -130,6 +131,7 @@ public:
 		m_bus = &bus;
 		m_width = width;
 		m_height = height;
+		ResetGameInput();
 		m_ui.SetViewport( width, height );
 		m_bus->Subscribe( "ui.click", &hfUiFrontend::OnUiEvent, this );
 		m_bus->Subscribe( "ui.change", &hfUiFrontend::OnUiEvent, this );
@@ -146,6 +148,7 @@ public:
 		m_hostHandled = false;
 		m_joyRepeatCooldown = 0;
 		m_joyAxis[ 0 ] = m_joyAxis[ 1 ] = 0;
+		ResetGameInput();
 		m_root = HF_Ecs::ENTITY_NULL;
 		m_resultLabel = HF_Ecs::ENTITY_NULL;
 		m_pendingBindRow = -1;
@@ -158,6 +161,26 @@ public:
 
 	void SetArena( HfArena *arena ) { m_arena = arena; }
 	HfArena *			GetArena() const { return m_arena; }
+
+	// --- gameplay input seam ---------------------------------------------
+	// UI input and gameplay input share the event stream but never the same
+	// command.  While PLAYING, HandleGameInput samples WASD / mouse / sticks
+	// into a plain HfArenaInput; keys that belong to the console or to pause
+	// are deliberately left unconsumed so the host still sees them.  The host
+	// polls GetGameInput() once per frame and hands it to the simulation.
+	const HfArenaInput & GetGameInput() const { return m_gameInput; }
+	void ResetGameInput() {
+		m_gameInput.Clear();
+		m_gameMoveKeys = 0;
+		m_gameAimKeys = 0;
+		m_gameStickMoveX = m_gameStickMoveY = 0.0f;
+		m_gameStickAimX = m_gameStickAimY = 0.0f;
+		m_gameCursorX = m_width * 0.5f;
+		m_gameCursorY = m_height * 0.5f;
+		m_gameAimMode = 0;
+	}
+	bool HandleGameInput( const sysEvent_t &ev ) { return HandleGameInputImpl( ev ); }
+
 	HF_Ecs::Registry *	RegistryPtr() { return &m_registry; }
 	hfUiSystem *		SystemPtr() { return &m_ui; }
 	hfUiSystem &		System() { return m_ui; }
@@ -257,6 +280,7 @@ public:
 		m_arenaAccum = 0.0f;
 		m_joyRepeatCooldown = 0;
 		m_joyAxis[ 0 ] = m_joyAxis[ 1 ] = 0;
+		ResetGameInput();	// no command may cross a screen transition
 
 		// One registry per frontend, cleared per screen: cheap, leak-free and
 		// it invalidates every stale entity reference in one step.
@@ -580,6 +604,119 @@ private:
 			}
 		}
 		return true;
+	}
+
+	// Bit masks for held gameplay keys; sticks and keys are combined so a
+	// player can switch between them without releasing the other device.
+	enum {
+		GMOVE_UP = 1, GMOVE_DOWN = 2, GMOVE_LEFT = 4, GMOVE_RIGHT = 8,
+		GAIM_UP = 1, GAIM_DOWN = 2, GAIM_LEFT = 4, GAIM_RIGHT = 8
+	};
+
+	void RecomputeGameMove() {
+		float x = ( ( m_gameMoveKeys & GMOVE_RIGHT ) ? 1.0f : 0.0f )
+				- ( ( m_gameMoveKeys & GMOVE_LEFT ) ? 1.0f : 0.0f ) + m_gameStickMoveX;
+		float y = ( ( m_gameMoveKeys & GMOVE_DOWN ) ? 1.0f : 0.0f )
+				- ( ( m_gameMoveKeys & GMOVE_UP ) ? 1.0f : 0.0f ) + m_gameStickMoveY;
+		m_gameInput.moveX = Clamp( x, -1.0f, 1.0f );
+		m_gameInput.moveY = Clamp( y, -1.0f, 1.0f );
+	}
+
+	void RecomputeGameAim() {
+		float dx;
+		float dy;
+		if ( m_gameAimMode == 0 ) {
+			dx = m_gameCursorX - m_width * 0.5f;
+			dy = m_gameCursorY - m_height * 0.5f;
+		} else {
+			dx = m_gameStickAimX
+			   + ( ( m_gameAimKeys & GAIM_RIGHT ) ? 1.0f : 0.0f )
+			   - ( ( m_gameAimKeys & GAIM_LEFT ) ? 1.0f : 0.0f );
+			dy = m_gameStickAimY
+			   + ( ( m_gameAimKeys & GAIM_DOWN ) ? 1.0f : 0.0f )
+			   - ( ( m_gameAimKeys & GAIM_UP ) ? 1.0f : 0.0f );
+		}
+		const float len = sqrtf( dx * dx + dy * dy );
+		if ( len < 0.001f ) {
+			m_gameInput.aimX = 0.0f;
+			m_gameInput.aimY = -1.0f;	// deterministic default facing
+		} else {
+			m_gameInput.aimX = dx / len;
+			m_gameInput.aimY = dy / len;
+		}
+	}
+
+	bool HandleGameInputImpl( const sysEvent_t &ev ) {
+		if ( m_state != HF_UI_FRONTEND_PLAYING ) {
+			return false;
+		}
+		switch ( ev.evType ) {
+			case SE_MOUSE_ABSOLUTE:
+				m_gameCursorX = Clamp( ( float )ev.evValue, 0.0f, m_width );
+				m_gameCursorY = Clamp( ( float )ev.evValue2, 0.0f, m_height );
+				m_gameAimMode = 0;
+				RecomputeGameAim();
+				return true;
+
+			case SE_MOUSE:
+				m_gameCursorX = Clamp( m_gameCursorX + ( float )ev.evValue, 0.0f, m_width );
+				m_gameCursorY = Clamp( m_gameCursorY + ( float )ev.evValue2, 0.0f, m_height );
+				m_gameAimMode = 0;
+				RecomputeGameAim();
+				return true;
+
+			case SE_KEY: {
+				const int key = ev.evValue;
+				// Console and pause keys stay with the host; consuming them
+				// here would turn gameplay into a keyboard trap.
+				if ( key == K_GRAVE || key == K_ESCAPE || key == K_JOY9 ) {
+					return false;
+				}
+				const bool down = ev.evValue2 != 0;
+				switch ( key ) {
+					case K_W: SetGameMoveKey( GMOVE_UP, down ); return true;
+					case K_S: SetGameMoveKey( GMOVE_DOWN, down ); return true;
+					case K_A: SetGameMoveKey( GMOVE_LEFT, down ); return true;
+					case K_D: SetGameMoveKey( GMOVE_RIGHT, down ); return true;
+					case K_SPACE: m_gameInput.dodge = down; return true;
+					case K_MOUSE1:
+					case K_JOY_TRIGGER1:
+					case K_JOY_TRIGGER2: m_gameInput.fire = down; return true;
+					case K_JOY_STICK2_UP: SetGameAimKey( GAIM_UP, down ); return true;
+					case K_JOY_STICK2_DOWN: SetGameAimKey( GAIM_DOWN, down ); return true;
+					case K_JOY_STICK2_LEFT: SetGameAimKey( GAIM_LEFT, down ); return true;
+					case K_JOY_STICK2_RIGHT: SetGameAimKey( GAIM_RIGHT, down ); return true;
+					default: return false;
+				}
+			}
+
+			case SE_JOYSTICK: {
+				const float value = ( float )ev.evValue2 / 127.0f;
+				switch ( ev.evValue ) {
+					case AXIS_LEFT_X: m_gameStickMoveX = value; RecomputeGameMove(); return true;
+					case AXIS_LEFT_Y: m_gameStickMoveY = value; RecomputeGameMove(); return true;
+					case AXIS_RIGHT_X: m_gameStickAimX = value; m_gameAimMode = 1; RecomputeGameAim(); return true;
+					case AXIS_RIGHT_Y: m_gameStickAimY = value; m_gameAimMode = 1; RecomputeGameAim(); return true;
+					default: return false;
+				}
+			}
+
+			default:
+				return false;
+		}
+	}
+
+	void SetGameMoveKey( int bit, bool down ) {
+		if ( down ) { m_gameMoveKeys |= bit; }
+		else { m_gameMoveKeys &= ~bit; }
+		RecomputeGameMove();
+	}
+
+	void SetGameAimKey( int bit, bool down ) {
+		if ( down ) { m_gameAimKeys |= bit; }
+		else { m_gameAimKeys &= ~bit; }
+		m_gameAimMode = 1;
+		RecomputeGameAim();
 	}
 
 	int FindBoundAction( HF_Ecs::Entity entity ) const {
@@ -914,6 +1051,16 @@ private:
 	bool				m_hostHandled;
 	int					m_joyRepeatCooldown;
 	int					m_joyAxis[ 2 ];
+
+	// Sampled gameplay intent (see HandleGameInput).  Never serialized.
+	HfArenaInput		m_gameInput;
+	int					m_gameMoveKeys;
+	int					m_gameAimKeys;
+	float				m_gameStickMoveX, m_gameStickMoveY;
+	float				m_gameStickAimX, m_gameStickAimY;
+	float				m_gameCursorX, m_gameCursorY;
+	int					m_gameAimMode;
+
 	float				m_mouseX = 0.0f;
 	float				m_mouseY = 0.0f;
 

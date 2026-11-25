@@ -37,6 +37,7 @@
 #include "../../hflib/ui/hfUiSettings.h"
 #include "../../hflib/ui/hfUiSaveSlots.h"
 #include "../../hflib/game/hfArenaSave.h"
+#include "../../renderer/hfUiDrawPass.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -2864,6 +2865,7 @@ static void Test_UiWidgets();
 static void Test_UiFrontend();
 static void Test_UiPersistence();
 static void Test_FrontendIntegration();
+static void Test_RiskMitigations();
 
 /*
 ================================
@@ -3232,6 +3234,7 @@ int HfTest_FeaturesMain() {
 	Test_UiFrontend();
 	Test_UiPersistence();
 	Test_FrontendIntegration();
+	Test_RiskMitigations();
 	printf( "features logic: %s (%d failures)\n", g_featFails == 0 ? "ok" : "FAIL", g_featFails );
 	return g_featFails;
 }
@@ -4479,4 +4482,147 @@ static void Test_FrontendIntegration() {
 
 	int added = g_featFails - fc;
 	printf( "phase 18 frontend integration: %s\n", added ? "FAIL" : "ok" );
+}
+
+// Risk mitigations from docs/twin-stick-arena-design.md: gameplay input
+// routing, draw-pass ownership, and save-schema drift.
+static void Test_RiskMitigations() {
+	using namespace HF_Ui;
+	int fc = g_featFails;
+
+	// (a) gameplay commands exist only in PLAYING; console/pause keys stay free
+	{
+		HF_Ecs::EventBus bus;
+		hfUiFrontend fe;
+		fe.Init( bus, 1024.0f, 768.0f );
+
+		sysEvent_t key;
+		memset( &key, 0, sizeof( key ) );
+		key.evType = SE_KEY;
+		key.evValue = K_W;
+		key.evValue2 = 1;
+		FEAT_ASSERT( !fe.HandleGameInput( key ) );		// TITLE never samples gameplay
+		FEAT_ASSERT( fe.GetGameInput().moveY == 0.0f );
+
+		fe.SetState( hfUiFrontend::HF_UI_FRONTEND_PLAYING );
+		FEAT_ASSERT( fe.HandleGameInput( key ) );
+		FEAT_NEAR( fe.GetGameInput().moveY, -1.0f, 1e-5f );
+		key.evValue = K_D;
+		FEAT_ASSERT( fe.HandleGameInput( key ) );
+		FEAT_NEAR( fe.GetGameInput().moveX, 1.0f, 1e-5f );
+		key.evValue = K_W;
+		key.evValue2 = 0;
+		FEAT_ASSERT( fe.HandleGameInput( key ) );
+		FEAT_NEAR( fe.GetGameInput().moveY, 0.0f, 1e-5f );
+
+		sysEvent_t stick;
+		memset( &stick, 0, sizeof( stick ) );
+		stick.evType = SE_JOYSTICK;
+		stick.evValue = AXIS_LEFT_Y;
+		stick.evValue2 = 127;
+		FEAT_ASSERT( fe.HandleGameInput( stick ) );
+		FEAT_NEAR( fe.GetGameInput().moveY, 1.0f, 1e-5f );
+
+		sysEvent_t mouse;
+		memset( &mouse, 0, sizeof( mouse ) );
+		mouse.evType = SE_MOUSE_ABSOLUTE;
+		mouse.evValue = 1024;
+		mouse.evValue2 = 384;
+		FEAT_ASSERT( fe.HandleGameInput( mouse ) );
+		FEAT_NEAR( fe.GetGameInput().aimX, 1.0f, 1e-5f );
+		FEAT_NEAR( fe.GetGameInput().aimY, 0.0f, 1e-4f );
+
+		stick.evValue = AXIS_RIGHT_Y;
+		stick.evValue2 = -127;
+		FEAT_ASSERT( fe.HandleGameInput( stick ) );
+		FEAT_NEAR( fe.GetGameInput().aimY, -1.0f, 1e-5f );
+
+		key.evValue = K_MOUSE1;
+		key.evValue2 = 1;
+		FEAT_ASSERT( fe.HandleGameInput( key ) );
+		FEAT_ASSERT( fe.GetGameInput().fire );
+		key.evValue2 = 0;
+		FEAT_ASSERT( fe.HandleGameInput( key ) );
+		FEAT_ASSERT( !fe.GetGameInput().fire );
+		key.evValue = K_SPACE;
+		key.evValue2 = 1;
+		FEAT_ASSERT( fe.HandleGameInput( key ) );
+		FEAT_ASSERT( fe.GetGameInput().dodge );
+
+		key.evValue = K_GRAVE;
+		FEAT_ASSERT( !fe.HandleGameInput( key ) );		// console keeps its key
+		key.evValue = K_ESCAPE;
+		FEAT_ASSERT( !fe.HandleGameInput( key ) );		// pause keeps its key
+		key.evValue = K_JOY9;
+		FEAT_ASSERT( !fe.HandleGameInput( key ) );
+
+		fe.SetState( hfUiFrontend::HF_UI_FRONTEND_PAUSED );
+		FEAT_ASSERT( !fe.GetGameInput().fire && !fe.GetGameInput().dodge );
+		FEAT_ASSERT( fe.GetGameInput().moveX == 0.0f && fe.GetGameInput().moveY == 0.0f );
+		FEAT_ASSERT( !fe.HandleGameInput( key ) );
+	}
+
+	// (b) the renderer's gameplay layer is owned by source + arena + flag.
+	// The pure gate is tested here because the headless harness does not link
+	// the renderer translation unit (and has no GL context).
+	{
+		using Gate = bool ( * )( bool, bool, bool );
+		const Gate gate = &hfUiDrawPass::GameplayOverlayGate;
+		FEAT_ASSERT( !gate( false, false, false ) );
+		FEAT_ASSERT( !gate( true, false, false ) );
+		FEAT_ASSERT( !gate( true, true, false ) );
+		FEAT_ASSERT( !gate( false, true, true ) );
+		FEAT_ASSERT( gate( true, true, true ) );
+	}
+
+	// (c) save schema manifest + Equals participation + legacy record parsing
+	{
+		HfArena arena;
+		arena.Reset( 7 );
+		for ( int i = 0; i < 12; i++ ) {
+			if ( ( i % 3 ) == 0 ) { arena.Attack(); }
+			else { arena.Retreat(); }
+			arena.Step();
+		}
+		hfArenaSave snap;
+		snap.Capture( arena );
+		FEAT_ASSERT( snap.SchemaRoundTrip() );
+
+		char text[ hfArenaSave::HF_ARENA_SAVE_TEXT_MAX ];
+		snap.Serialize( text, sizeof( text ) );
+		int count = 0;
+		const char * const * keys = hfArenaSave::FieldKeys( count );
+		FEAT_ASSERT( count >= 16 );
+		for ( int i = 0; i < count; i++ ) {
+			FEAT_ASSERT( strstr( text, keys[ i ] ) != NULL );
+		}
+
+		hfArenaSave changed;
+#define CHECK_FIELD( mutation ) do { changed = snap; mutation; FEAT_ASSERT( !changed.Equals( snap ) ); } while ( 0 )
+		CHECK_FIELD( changed.playerX += 1.0f );
+		CHECK_FIELD( changed.playerY += 1.0f );
+		CHECK_FIELD( changed.hitPoints++ );
+		CHECK_FIELD( changed.score++ );
+		CHECK_FIELD( changed.wave++ );
+		CHECK_FIELD( changed.ticks++ );
+		CHECK_FIELD( changed.gameOver = !changed.gameOver );
+		CHECK_FIELD( changed.won = !changed.won );
+		CHECK_FIELD( changed.enemyCount++ );
+		CHECK_FIELD( changed.bulletCount++ );
+		CHECK_FIELD( changed.fireCooldown++ );
+		CHECK_FIELD( changed.intent++ );
+		CHECK_FIELD( changed.rng++ );
+		CHECK_FIELD( changed.enemies[ 0 ].x += 1.0f );
+		CHECK_FIELD( changed.enemies[ 0 ].hp++ );
+		CHECK_FIELD( changed.bullets[ 0 ].vx += 1.0f );
+		CHECK_FIELD( changed.bullets[ 0 ].life++ );
+#undef CHECK_FIELD
+
+		hfArenaSave legacy;
+		FEAT_ASSERT( legacy.Parse( "version = 1\nscore = 42\nunknown_key = 9\n" ) );
+		FEAT_ASSERT( legacy.score == 42 );
+	}
+
+	int added = g_featFails - fc;
+	printf( "phase 18 risk mitigations: %s\n", added ? "FAIL" : "ok" );
 }
