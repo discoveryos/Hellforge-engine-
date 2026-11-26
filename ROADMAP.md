@@ -330,3 +330,14 @@ optional CPython, Windows), running and controls, hfscript dialects and the
 and the draw-pass gate, per-account persistence, the 4-way test matrix, the
 first-game plan, gotchas and a symbol/file reference. Start at
 `guide/README.md`.
+
+### Repository cleanup — stale build artifacts removed from git ✅
+
+The root `build/` directory was an old CMake tree accidentally committed in
+`3cbc0bd` (1,356 tracked files, ~61 MB of binaries/objects from September). It
+is now untracked (`git rm -r --cached build`) and added to `.gitignore`; the
+local copy was left untouched. Active builds remain `neo/build/` and
+`neo/build-jolt/`. Guide references to ignored directories were updated.
+`ALL PASSED` plain/headless × default/Jolt (4/4 matrix); both engine binaries
+rebuilt. Note: removing the files from *history* would require a rewrite and
+was deliberately not done.

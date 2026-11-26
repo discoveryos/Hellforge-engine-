@@ -1,5 +1,6 @@
 neo/build/
 neo/build-jolt/
+build/
 *.o
 *.a
 *.gch

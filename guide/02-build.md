@@ -85,7 +85,7 @@ use `neo/` as the CMake source directory.
 
 ## Never commit build artifacts
 
-`.gitignore` excludes `neo/build/`, `neo/build-jolt/`, `*.o`, `*.a`, `*.gch`.
+`.gitignore` excludes `build/`, `neo/build/`, `neo/build-jolt/`, `*.o`, `*.a`, `*.gch`.
 Commit source and docs only. Check before committing:
 
 ```sh

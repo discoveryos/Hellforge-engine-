@@ -66,7 +66,7 @@ functions (`GameplayOverlayGate`) and let the renderer delegate to them.
 
 ## 12. Build artifacts must not be committed
 
-`neo/build/`, `neo/build-jolt/`, `*.o`, `*.a`, `*.gch` are gitignored. Verify
+`build/`, `neo/build/`, `neo/build-jolt/`, `*.o`, `*.a`, `*.gch` are gitignored. Verify
 with `git status --short` before committing; only source and docs go in.
 
 ## 13. Header changes cause long rebuilds
