@@ -40,6 +40,7 @@
 | `docs/twin-stick-arena-design.md` | First-game design and six game phases |
 | `neo/renderer/GLSL_uber_shaders.md` | Renderer/UI shader-notes and Phase 18/overlay documentation |
 | This guide | Practical how-to, from build to game |
+| `guide/12-hfscript.md` | Dedicated hfscript language/VM deep dive |
 
 ## Glossary
 

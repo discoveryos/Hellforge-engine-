@@ -1,5 +1,8 @@
 # 04 — Scripting
 
+For a deeper, hfscript-only explanation of the language, VM, host functions and
+compiled images, see [chapter 12](12-hfscript.md).
+
 ## The four source dialects
 
 `HfScript_LoadFile()` (`neo/script/HfScript_Engine.cpp:383`) chooses a front

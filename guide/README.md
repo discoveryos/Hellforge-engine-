@@ -38,6 +38,7 @@ release, so this fallback arena is the playable content today.
 | 09 | [The first game: twin-stick arena](09-first-game.md) | Game plan, its six phases, what is already mitigated |
 | 10 | [Gotchas and troubleshooting](10-gotchas.md) | Non-obvious traps that cost time |
 | 11 | [File & symbol reference](11-reference.md) | Where to find each subsystem and key entry points |
+| 12 | [hfscript, explained from scratch](12-hfscript.md) | Dedicated deep dive: values, syntax, host functions, bytecode, loading, AOT and JIT |
 
 ## Two meanings of "phase"
 
