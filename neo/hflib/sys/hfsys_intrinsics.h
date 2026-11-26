@@ -135,6 +135,12 @@ HF_INLINE_EXTERN int CACHE_LINE_CLEAR_OVERFLOW_COUNT( int size ) {
 
 #if defined(__SSE2__)
 #include <emmintrin.h>
+// Some legacy code aliased __m128c to __m128 with a macro.  The union below
+// is the real type used for type-unsafe conversions between __m128/__m128i,
+// so clear any stale macro before declaring it.
+#ifdef __m128c
+#undef __m128c
+#endif
 #endif
 #if defined(__SSE2__)
 typedef union __attribute__((aligned(16))) __m128c {

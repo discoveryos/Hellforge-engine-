@@ -341,3 +341,23 @@ local copy was left untouched. Active builds remain `neo/build/` and
 `ALL PASSED` plain/headless × default/Jolt (4/4 matrix); both engine binaries
 rebuilt. Note: removing the files from *history* would require a rewrite and
 was deliberately not done.
+
+### Documentation — WSL build notes ✅
+
+Added `guide/13-wsl-alpine-debian.md` (linked from the guide index, build
+chapter and reference): Alpine/musl and Debian/Ubuntu WSL package lists, the
+shared CMake commands, WSLg/X-forwarding display setup and a troubleshooting
+table. Alpine instructions are documented but not verified on this glibc
+host. No source changes; matrix 4/4 `ALL PASSED` and both binaries rebuilt.
+
+### Build fix — x86/Linux SIMD `__m128c` conflict ✅
+
+`hfsys_includes.h` defined `__m128c` as a macro alias for `__m128` under
+SSE/SSE2. On x86/x86_64 that macro expanded inside the `__m128c` union in
+`hfsys_intrinsics.h`, producing GCC errors such as "redefinition of
+`__m128`"/"`__m128c` redeclared as different kind of entity". The alias was
+removed and the union header now clears any stale `__m128c` macro before
+declaring the union that converts between `__m128` and `__m128i`. This path
+is compiled on x86_64 Alpine/Debian WSL; it is skipped on this aarch64 host,
+so the header was also checked with a fake-SSE compile harness. WSL guide
+troubleshooting was updated. Matrix 4/4 `ALL PASSED`; both binaries rebuilt.

@@ -1,5 +1,9 @@
 # 02 — Compiling
 
+Building in WSL (Alpine or Debian/Ubuntu)? Start with
+[chapter 13](13-wsl-alpine-debian.md) for the right package list and display
+setup; the CMake commands below are the same.
+
 ## Requirements
 
 - CMake **3.16+**

@@ -58,7 +58,9 @@
 #if defined(__SSE__) || defined(__SSE2__)
 #include <emmintrin.h>
 #include <xmmintrin.h>
-#define __m128c __m128
+// Do not alias __m128c to __m128 here.  hfsys_intrinsics.h defines __m128c
+// as a union with conversions between __m128 and __m128i; aliasing the name
+// first makes GCC expand that typedef to "__m128" and fail on x86/x86_64.
 #endif
 
 #endif /* _WIN32 */
