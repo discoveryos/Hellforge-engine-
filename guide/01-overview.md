@@ -44,7 +44,7 @@ the whole game testable without a GPU.
                                                              ▼
                                                        HfArenaInput
                                                              │
-   hfscript .eng ──► arena_* hosts ──► HfArena::Step() ◄─────┘  (gameplay pending)
+   hfscript .eng ──► arena_* hosts ──► HfArena::Step(cmd) ◄───┘
                                              │
                                              ▼
                                       hfArenaSave ──► console slots

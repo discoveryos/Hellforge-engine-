@@ -90,10 +90,10 @@ Gameplay input sampler (`hfUiFrontend::HandleGameInput`, PLAYING only):
 | Space | `dodge` |
 
 `K_GRAVE`, `K_ESCAPE` and `K_JOY9` are deliberately left unconsumed so the
-console and pause systems still receive them. **Note:** the sampler exists but
-the sim does not yet consume it — the arena still runs its built-in
-attack/retreat autopilot. Hooking it to `HfArena::Step(const HfArenaInput&)`
-is game phase 3 / [chapter 05](05-making-a-game-cpp.md).
+console and pause systems still receive them. While PLAYING, the frontend
+passes that command to `HfArena::Step(cmd)` on every fixed tick; the bundled
+`arena.eng` demo still uses the zero-argument auto-pilot Step. See
+[chapter 05](05-making-a-game-cpp.md) for the game-facing API.
 
 ## What you see
 

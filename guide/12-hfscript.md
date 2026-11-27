@@ -150,7 +150,7 @@ Registered in `HfScript_Init()` (`neo/script/HfScript_Engine.cpp:281`):
 | Conversion | `int`, `float`, `bool` |
 | Math | `abs`, `min`, `max`, `sqrt`, `floor`, `ceil`, `round`, `random` |
 | Engine | `getcvar`, `setcvar`, `exec`, `time` |
-| Game | the ten `arena_*` functions registered by `HfScript_RegisterArenaHosts()` |
+| Game | the `arena_*` functions registered by `HfScript_RegisterArenaHosts()` |
 
 `format("Hello, {}!", name)` uses numbered `{}` placeholders. `getcvar(name)`
 reads a cvar as a string; `setcvar(name, value)` writes one. Avoid `random()`
@@ -165,11 +165,21 @@ C++ sim instead.
 arena_reset(seed)    arena_running()    arena_hp()       arena_score()
 arena_wave()         arena_ticks()      arena_nearest()  arena_attack()
 arena_retreat()      arena_step()
+
+arena_set_move(x,y)  arena_set_aim(x,y) arena_set_fire(flag)
+arena_set_dodge(flag) arena_clear_command() arena_step_cmd()
+arena_enemy_kind(i)  arena_pickup_kind(i)
+arena_ammo()         arena_combo()      arena_best_combo()
+arena_kills()        arena_dodge_cooldown()
+arena_enemy_count()  arena_pickup_count()
+arena_facing_x()     arena_facing_y()
 ```
 
 `arena_nearest()` returns the nearest enemy's **distance** (a float), not an
-index. `arena_attack()` and `arena_retreat()` set the sim's `intent`; they do
-not advance time. Only `arena_step()` advances the fixed tick.
+index. `arena_attack()` and `arena_retreat()` set the auto-pilot `intent`;
+`arena_step()` advances that fixed tick. The command-driven path builds an
+`arena_*` command, advances with `arena_step_cmd()`, and is the same simulation
+the frontend uses. Do not mix the two paths in one replay.
 
 ## 5. Writing your own host function
 

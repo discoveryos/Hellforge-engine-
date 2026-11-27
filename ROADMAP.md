@@ -361,3 +361,29 @@ declaring the union that converts between `__m128` and `__m128i`. This path
 is compiled on x86_64 Alpine/Debian WSL; it is skipped on this aarch64 host,
 so the header was also checked with a fake-SSE compile harness. WSL guide
 troubleshooting was updated. Matrix 4/4 `ALL PASSED`; both binaries rebuilt.
+
+### Twin-stick arena — phases 1–6 ✅
+
+The six phases from `docs/twin-stick-arena-design.md` are implemented in the
+engine and exposed as reusable game-facing APIs:
+
+- `HfArena` gains chaser/spitter/brute/boss archetypes, enemy bullets, pickups,
+  facing, ammo, dodge i-frames, combo/kills and wave-director state.
+  `Step(const HfArenaInput&)` is the gameplay entry point; zero-argument
+  `Step()` remains the deterministic auto-pilot used by `base/script/arena.eng`.
+- `hfUiFrontend` feeds its sampled command into the fixed-step simulation;
+  WASD/left stick, mouse/right stick, fire and dodge are PLAYING-only.
+  The draw pass colours archetypes/pickups/bullets and shows facing/dodge cues;
+  the HUD adds ammo/dodge/combo/kills and RESULTS adds a run summary.
+- `hfArenaSave` is version 2: v1 records still parse with defaults, and the
+  `FieldKeys()` manifest plus field-wise `Equals()` cover every new field.
+- `HfArenaGame` (`neo/hflib/game/hfArenaGame.h`) owns the engine's default
+  arena/command buffer and gives future game code `Start/Step/Run/Active()`
+  without touching engine internals. New scalar `arena_*` hosts expose the same
+  gameplay to hfscript. With no `.map` or game DLL in this checkout, START uses
+  that facade arena; `ui_startMap` stays the hook for shipped content.
+- **Validate:** `Test_TwinStickArena()` — command determinism/bounds, archetype
+  and boss behaviour, pickups, scoring, dodge/death/win, frontend command
+  routing, HUD/results, v1/v2 saves with replay after load, and the shared
+  facade/script instance. `ALL PASSED`, plain and `--headless`, default and
+  Jolt (4/4 matrix). Both engine binaries rebuilt; no build artifacts committed.

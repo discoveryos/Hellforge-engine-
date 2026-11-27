@@ -54,24 +54,30 @@ add more with `HfScript_RegisterHost`.
 
 ## The arena host functions
 
-`neo/script/HfScript_Game.h` registers all ten existing `arena_*` hosts:
+`neo/script/HfScript_Game.h` registers the `arena_*` hosts. The original ten
+drive the auto-pilot demo; the command-driven gameplay hosts drive the twin-
+stick sim:
 
 | Function | Meaning |
 |----------|---------|
 | `arena_reset(seed)` | Reset the sim with seed (`0` becomes `1`) and spawn wave 1 |
 | `arena_running()` | `1` while not game over |
-| `arena_hp()` | Player hit points |
-| `arena_score()` | Score |
-| `arena_wave()` | Current wave |
-| `arena_ticks()` | Elapsed fixed ticks |
-| `arena_nearest()` | Index of nearest enemy (`-1` if none) |
-| `arena_attack()` | Set intent to +1 (steer toward and fire) |
-| `arena_retreat()` | Set intent to -1 (move away) |
-| `arena_step()` | Advance one fixed tick |
+| `arena_hp()` / `arena_score()` / `arena_wave()` / `arena_ticks()` | Run state |
+| `arena_nearest()` | Distance to the nearest enemy (`0` if none) |
+| `arena_attack()` / `arena_retreat()` | Set auto-pilot intent |
+| `arena_step()` | Advance one auto-pilot tick |
+| `arena_set_move(x,y)` / `arena_set_aim(x,y)` | Build a gameplay command |
+| `arena_set_fire(flag)` / `arena_set_dodge(flag)` | Fire/dodge intent |
+| `arena_clear_command()` | Reset the command buffer |
+| `arena_step_cmd()` | Advance one tick using the command buffer |
+| `arena_enemy_kind(i)` / `arena_pickup_kind(i)` | Scalar kind queries (`-1` out of range) |
+| `arena_ammo()` / `arena_combo()` / `arena_best_combo()` / `arena_kills()` | Gameplay state |
+| `arena_dodge_cooldown()` / `arena_enemy_count()` / `arena_pickup_count()` | Gameplay state |
+| `arena_facing_x()` / `arena_facing_y()` | Normalized aim vector |
 
-hfscript cannot read the structured arrays; that is deliberate. Planned but
-**not implemented** hosts: `arena_set_move`, `arena_set_aim`, `arena_set_fire`,
-`arena_set_dodge`, `arena_enemy_kind`, `arena_pickup_kind`.
+No structured arrays cross the script boundary; a kind/state query returns a
+single int or float. Wrap command-driven loops in `define main` / `main()` when
+using the English dialect's `repeat ... times` form.
 
 ## The sample game, line by line
 

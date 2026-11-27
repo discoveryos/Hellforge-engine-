@@ -18,10 +18,12 @@
 
 	Text format:
 
-		move_up = 87,0
-		fire    = 32,0
+		move_up = 17,0     # K_W
+		fire    = 286,0    # K_MOUSE1
+		dodge   = 57,0     # K_SPACE
 
 	`key = primary,secondary`, key numbers as integers (0 = unbound).
+	Symbolic `K_*` names are for C++ code; Parse() expects integers.
 
 ===============================================================================
 */
@@ -53,7 +55,8 @@ public:
 		Bind( "move_down", K_S );
 		Bind( "move_left", K_A );
 		Bind( "move_right", K_D );
-		Bind( "fire", K_SPACE );
+		Bind( "fire", K_MOUSE1 );
+		Bind( "dodge", K_SPACE );
 		Bind( "pause", K_ESCAPE );
 		Bind( "confirm", K_ENTER );
 	}

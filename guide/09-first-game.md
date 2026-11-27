@@ -41,29 +41,26 @@ on the same binary.
 
 Each phase must keep the 4-way matrix green and end with both binaries rebuilt.
 
-## What has landed already (pre-phase-1 risk mitigation)
+## What has landed
 
-These are *enablers*, not gameplay:
+All six phases are implemented in the engine:
 
-- `HfArenaInput` POD in `neo/hflib/game/hfArena.h`.
-- `hfUiFrontend::HandleGameInput()` sampling only in PLAYING, with `K_GRAVE`,
-  `K_ESCAPE`, `K_JOY9` left unconsumed and a reset on every state transition.
-- `hfCommonLocal::MenuEvent()` PLAYING routing.
-- `hfUiDrawPass` source + arena + enabled gate; minimal quad arena overlay
-  under the HUD; pure `GameplayOverlayGate()` for headless tests.
-- `hfArenaSave::FieldKeys()` and `SchemaRoundTrip()` schema guard.
-- `Test_RiskMitigations()` covering all three risks.
+- `HfArena::Step(cmd)` with archetypes, boss waves, pickups, ammo/dodge/combo,
+  plus the separate legacy `Step()` auto-pilot.
+- `hfUiFrontend` command routing and the extended HUD/RESULTS summary.
+- `hfUiDrawPass` quad overlay for enemy/pickup/bullet kinds, facing and dodge.
+- `hfArenaSave` v2 with v1-compatible parsing and replay-after-load tests.
+- `HfArenaGame` plus scalar `arena_*` hosts so a future game can reuse the
+  engine implementation instead of rewriting it.
 
+`Test_TwinStickArena()` and `Test_RiskMitigations()` cover the headless path.
 Verified `ALL PASSED` plain/headless × default/Jolt; both binaries rebuilt.
 
-## What is deliberately out of scope until phase 6
+## What remains content work
 
 - Real `.map` assets — none exist in this checkout.
-- Game DLL — none shipped, and `LoadGameDLL()` is compiled out.
+- Game DLL — none shipped; `ui_startMap` is the hook for one.
 - GPU visual validation — no display/GL on this host; only structural checks.
 
-## Starting phase 1
-
-See [chapter 05](05-making-a-game-cpp.md) for the concrete code changes and
-[chapter 07](07-saves.md) for the save checklist. Start with `HfArena`, add a
-determinism test, and run the matrix before touching UI or renderer code.
+See [chapter 05](05-making-a-game-cpp.md) for the game-facing API and
+[chapter 07](07-saves.md) for the save schema.

@@ -21,8 +21,9 @@
 
 | Type | File | Notes |
 |------|------|-------|
-| `HfArena`, `HfArenaEnemy`, `HfArenaBullet`, `HfArenaInput` | `neo/hflib/game/hfArena.h` | Header-only deterministic sim + command POD |
-| `hfArenaSave` | `neo/hflib/game/hfArenaSave.h` | Versioned text snapshot, `FieldKeys`, `SchemaRoundTrip` |
+| `HfArena`, `HfArenaEnemy`, `HfArenaBullet`, `HfArenaPickup`, `HfArenaInput` | `neo/hflib/game/hfArena.h` | Header-only deterministic sim + command POD |
+| `HfArenaGame` | `neo/hflib/game/hfArenaGame.h` | Game-facing facade: `Start`, `Step`, `Run`, `Active` |
+| `hfArenaSave` | `neo/hflib/game/hfArenaSave.h` | v2 text snapshot with v1 parsing, `FieldKeys`, `SchemaRoundTrip` |
 | `hfUiFrontend` | `neo/hflib/ui/hfUiFrontend.h` | States, widgets, HUD, input sampler |
 | `hfUiBuilder` | `neo/hflib/ui/hfUiBuilder.h` | AddLabel/AddButton helpers |
 | `hfUiInput`, `hfUiWidget`, `hfUiSystem` | `neo/hflib/ui/` | Pointer/focus, widgets, ECS draw list |

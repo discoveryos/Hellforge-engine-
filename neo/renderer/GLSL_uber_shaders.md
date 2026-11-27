@@ -2210,3 +2210,23 @@ that the save schema manifest round-trips. `ALL PASSED`, plain and
 The practical how-to for this render/UI path now lives in `guide/README.md`,
 with UI/input details in `guide/06-ui-and-input.md`, the headless-safe draw
 gate in `guide/08-tests.md`, and render gotchas in `guide/10-gotchas.md`.
+
+## 28. Twin-stick arena gameplay overlay
+
+The quad overlay now reflects the full simulation without adding textures or a
+scene path. Chasers are red, spitters cyan, brutes violet and the boss pink;
+ammo, health and score pickups are yellow, green and magenta; enemy bullets are
+pink while player bullets stay pale yellow. A short facing pip and a
+translucent shell during dodge i-frames make aim and evasion readable.
+
+The frontend supplies a plain `HfArenaInput` to `HfArena::Step(cmd)`; the draw
+pass only reads arena state through the existing `(source, arena, enabled)`
+gate, so headless builds still short-circuit before GL. Game code can use the
+same state through `HfArenaGame` or the scalar `arena_*` hfscript hosts.
+
+### Verification
+
+`Test_TwinStickArena()` pins the headless-testable parts: command routing, HUD
+and RESULTS text, v1/v2 save compatibility and replay determinism. `ALL
+PASSED`, plain and `--headless`, default and Jolt (4/4 matrix). Runtime colour
+composition still needs a GPU/display and is not asserted here.

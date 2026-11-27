@@ -1,6 +1,7 @@
 # Twin-stick Arena — design & implementation plan
 
-**Status:** plan approved; pre-phase-1 risk mitigation landed (see section 7).
+**Status:** phases 1–6 implemented in the engine, exposed through reusable
+game-facing APIs (see sections 4.2 and 5).
 **Target:** the first playable game built on the Phase 9–18 engine substrate.
 **Definition of done:** start the engine, land on TITLE, press PLAY, steer and
 shoot with mouse/keyboard or gamepad, survive escalating waves, pause/resume,
@@ -35,8 +36,10 @@ game”, and every step is testable headlessly.
 | Tests | `neo/script/tests/hfstest_features.cpp` | `Test_Game`, `Test_UiFrontend`, `Test_UiPersistence`, `Test_FrontendIntegration` |
 
 **Constraints from the current checkout:** no `.map` assets and no game DLL, so
-the boot path intentionally falls back to the frontend-owned arena. A real map
-becomes possible once `ui_startMap` names one and a game module is installed.
+the boot path intentionally uses the engine-owned `HfArenaGame::Active()`
+arena. Phase 6 delivers the reusable game-facing API rather than content; a
+real map becomes possible once `ui_startMap` names one and a game module is
+installed.
 
 ## 3. Gameplay design
 
@@ -89,11 +92,25 @@ drive a demo bot and tests can replay decisions:
 ```
 arena_set_move(x, y)     arena_set_aim(x, y)
 arena_set_fire(flag)     arena_set_dodge(flag)
+arena_step_cmd()         arena_clear_command()
 arena_enemy_kind(i)      arena_pickup_kind(i)
+arena_ammo()             arena_combo()        arena_kills()
 ```
 
-Structured state stays in C++; scripts only issue scalars. This preserves the
-engine’s scripting contract and gives a non-GPU way to validate gameplay.
+C++ game code can skip hfscript entirely and include
+`neo/hflib/game/hfArenaGame.h`:
+
+```cpp
+HfArenaGame::Start( seed );
+HfArenaGame::Run( command, steps );
+HfArena &arena = HfArenaGame::Active();
+```
+
+The facade owns the engine's default arena and command buffer, so a future game
+module can drive the same simulation without touching the frontend, save slots
+or renderer. Structured state stays in C++; scripts only issue scalars. This
+preserves the engine’s scripting contract and gives a non-GPU way to validate
+gameplay.
 
 ### 4.3 Save payload versioning
 
@@ -127,29 +144,37 @@ Option 1 is the milestone target; option 2 is a follow-up, not a prerequisite.
 Each phase keeps the 4-way matrix green (`ALL PASSED`, plain/headless ×
 default/Jolt) and ends with both engine binaries rebuilt.
 
-1. **Data model** — extend `HfArena` with input commands, enemy kinds, pickups,
-   ammo/dodge/combo; add `Step(cmd)`, keep `Step()` auto-pilot; harness checks
-   determinism and bounds.
-2. **Gameplay rules** — archetype behaviour, wave director, boss, pickups,
-   scoring; `Test_Game` extended with scripted 20–40 tick scenarios.
-3. **Input plumbing** — frontend input sampler, keybind actions for fire/dodge,
-   right-stick aim and trigger fire; no UI focus changes while PLAYING.
-4. **Presentation** — arena draw layer, HUD extensions, results summary;
-   headless draw is a no-op, so no GPU is required for tests.
-5. **Persistence** — v2 save payload with v1 compatibility; slot round-trip and
-   replay-after-load checks in `Test_FrontendIntegration`.
-6. **Real map path** — add a minimal `.map` and game module, wire `ui_startMap`,
-   and verify START → LOADING → PLAYING with the session-owned transition.
+1. **Data model ✅** — `HfArena` now has enemy/pickup/bullet kinds, facing,
+   ammo, dodge, combo, kills and wave-director fields; `Step(cmd)` is the
+   gameplay entry point and `Step()` remains the legacy auto-pilot.
+2. **Gameplay rules ✅** — chaser/spitter/brute/boss behaviour, seeded wave
+   mixing, boss escorts, ranged enemy bullets, pickups, combo scoring, wave
+   clear bonus and win/loss transitions; `Test_TwinStickArena()` covers 20–40
+   tick scripted scenarios.
+3. **Input plumbing ✅** — the frontend feeds its sampled `HfArenaInput` to
+   `Step(cmd)`; WASD/left stick, mouse/right stick, LMB/trigger fire and
+   Space dodge are routed only in PLAYING, with reserved keys left free.
+4. **Presentation ✅** — `hfUiDrawPass` colours archetypes/pickups/bullets and
+   draws facing/dodge cues; HUD adds ammo, dodge, combo and kills, and RESULTS
+   adds a run summary. Headless draw remains a no-op.
+5. **Persistence ✅** — `hfArenaSave` is version 2 with v1-compatible parsing;
+   `FieldKeys()`/`Equals()` cover every new field and replay-after-load is
+   asserted.
+6. **Game-facing API ✅** — the six phases live in the engine; a future game
+   uses `HfArenaGame` and the scalar `arena_*` hosts instead of rewriting
+   engine internals. With no `.map` assets or game DLL in this checkout, START
+   still uses the engine-owned facade arena; `ui_startMap` remains the hook for
+   a shipped map/module.
 
 ## 6. Tests to add
 
-- `Test_Game`: fixed-seed replay produces identical state after N ticks with a
-  scripted input sequence; wave 5 spawns a boss; pickups cap; damage/death/win
-  transitions; `Step()` auto-pilot still behaves as before.
-- `Test_UiFrontend`: fire/dodge keybind actions reach the input sampler; PAUSED
-  freezes ticks and queued commands; RESULTS summary values.
-- `Test_FrontendIntegration`: v1 and v2 slots both load; v2 round-trip preserves
-  new fields; load-then-step diverges identically from a direct replay.
+- `Test_Game`: legacy `.eng` auto-pilot still terminates deterministically.
+- `Test_TwinStickArena`: command determinism and bounds; archetypes, boss wave,
+  spitter bullets, pickups cap, scoring, death/i-frame/win transitions;
+  frontend command routing; HUD and RESULTS summary text; v2 save round-trip,
+  v1 slot compatibility, replay after load; `HfArenaGame` and hfscript command
+  hosts share one engine instance.
+- `Test_FrontendIntegration`: v2 slot text/round-trip and field-wise equality.
 - Matrix requirement unchanged: no FAIL lines in any of the four runs.
 
 ## 7. Risks / open questions

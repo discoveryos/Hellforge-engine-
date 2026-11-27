@@ -40,8 +40,9 @@ idle frame.
 `neo/hflib/game/hfArenaSave.h` is a header-only, allocation-free struct:
 
 ```
-HF_ARENA_SAVE_VERSION = 1
-HF_ARENA_SAVE_TEXT_MAX = 4096
+HF_ARENA_SAVE_VERSION = 2
+HF_ARENA_SAVE_LEGACY_VERSION = 1
+HF_ARENA_SAVE_TEXT_MAX = 8192
 ```
 
 Methods:
@@ -63,31 +64,35 @@ Text format: one `key = value` line per field; floats are stored as their
 remaining readable and diffable. Version 1 records are still parsed by newer
 code, with unknown keys ignored and missing new fields defaulted.
 
-The 16 declared keys:
+The 29 declared keys (v2):
 
 ```
-version, player_x, player_y, hit_points, score, wave, ticks, game_over,
-won, enemy_count, bullet_count, fire_cooldown, intent, rng, enemies, bullets
+version, player_x, player_y, facing_x, facing_y, hit_points, score, wave,
+ticks, game_over, won, enemy_count, bullet_count, pickup_count,
+fire_cooldown, ammo, dodge_cooldown, dodge_iframes, rapid_ticks, combo,
+best_combo, combo_timer, kills, wave_delay, intent, rng, enemies, bullets,
+pickups
 ```
+
+Version 1 records use the older two-field enemy and five-field bullet syntax;
+`Parse()` detects the version and defaults y/kind/cooldown/team and all new
+fields. Unknown keys are still ignored.
 
 ## Why equality is field-wise
 
-`HfArenaEnemy` is 12 bytes and `HfArenaBullet` is 20 bytes in this build. They
-contain **tail padding**, which is not initialized predictably. A `memcmp` of
-two logically equal snapshots reports differences (this actually broke a test:
-`SNAP memcmp e=-1 b=0 sizes 12/20`). `Equals()` therefore compares every field
+`HfArenaEnemy`, `HfArenaBullet` and `HfArenaPickup` carry **tail padding**,
+which is not initialized predictably. A `memcmp` of two logically equal
+snapshots reports differences. `Equals()` therefore compares every field
 explicitly, and the harness mutates each field to prove it notices.
 
-## Adding a new saved field (v2 checklist)
-
-When the game adds ammo, dodge cooldown, pickups, combo, enemy `kind`, etc.:
+## Adding a new saved field (checklist)
 
 1. Add the field to the sim (`hfArena.h`) and the snapshot (`hfArenaSave.h`).
 2. Update `Clear()`, `Capture()` and `Restore()`.
-3. Add it to `Serialize()` and `Parse()` with a version-1 default.
+3. Add it to `Serialize()` and `Parse()` with a v1-compatible default.
 4. Add it to `Equals()` — field by field.
 5. Add its key to `FieldKeys()` — the manifest that tests walk.
-6. Bump `HF_ARENA_SAVE_VERSION` to 2.
+6. Bump `HF_ARENA_SAVE_VERSION` when the layout changes; keep legacy parsing.
 7. Add a v1 fixture test and a v2 round-trip test; run the 4-way matrix.
 
 `SchemaRoundTrip()` plus the field-mutation loop in `Test_RiskMitigations()`

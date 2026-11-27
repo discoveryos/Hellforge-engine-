@@ -85,6 +85,10 @@ public:
 		HF_UI_HUD_SCORE = 0,
 		HF_UI_HUD_HEALTH,
 		HF_UI_HUD_WAVE,
+		HF_UI_HUD_AMMO,
+		HF_UI_HUD_DODGE,
+		HF_UI_HUD_COMBO,
+		HF_UI_HUD_KILLS,
 		HF_UI_HUD_COUNT
 	};
 
@@ -110,6 +114,7 @@ public:
 		m_logCount = 0;
 		m_root = HF_Ecs::ENTITY_NULL;
 		m_resultLabel = HF_Ecs::ENTITY_NULL;
+		m_resultSummary = HF_Ecs::ENTITY_NULL;
 		m_musicSlider = HF_Ecs::ENTITY_NULL;
 		m_sfxSlider = HF_Ecs::ENTITY_NULL;
 		m_fullscreenToggle = HF_Ecs::ENTITY_NULL;
@@ -151,6 +156,7 @@ public:
 		ResetGameInput();
 		m_root = HF_Ecs::ENTITY_NULL;
 		m_resultLabel = HF_Ecs::ENTITY_NULL;
+		m_resultSummary = HF_Ecs::ENTITY_NULL;
 		m_pendingBindRow = -1;
 		m_keybindRowCount = 0;
 		m_keybindStatus = HF_Ecs::ENTITY_NULL;
@@ -197,6 +203,7 @@ public:
 	HF_Ecs::Entity	GetSfxSlider() const { return m_sfxSlider; }
 	HF_Ecs::Entity	GetFullscreenToggle() const { return m_fullscreenToggle; }
 	HF_Ecs::Entity	GetResultLabel() const { return m_resultLabel; }
+	HF_Ecs::Entity	GetResultSummaryLabel() const { return m_resultSummary; }
 	hfUiSaveSlots &	SaveSlots() { return m_saveSlots; }
 	const hfUiSaveSlots & SaveSlots() const { return m_saveSlots; }
 	int GetLastSaveSlot() const { return m_lastSaveSlot; }
@@ -289,6 +296,7 @@ public:
 		m_bindCount = 0;
 		m_root = HF_Ecs::ENTITY_NULL;
 		m_resultLabel = HF_Ecs::ENTITY_NULL;
+		m_resultSummary = HF_Ecs::ENTITY_NULL;
 		m_musicSlider = HF_Ecs::ENTITY_NULL;
 		m_sfxSlider = HF_Ecs::ENTITY_NULL;
 		m_fullscreenToggle = HF_Ecs::ENTITY_NULL;
@@ -494,7 +502,8 @@ public:
 			m_arenaAccum += ( dt > 0.25f ? 0.25f : dt );
 			int steps = 0;
 			while ( m_arenaAccum >= kTick && steps < 8 ) {
-				m_arena->Step();
+				// The sampler produces a plain command; the sim consumes it.
+				m_arena->Step( m_gameInput );
 				m_arenaAccum -= kTick;
 				steps++;
 			}
@@ -963,6 +972,14 @@ private:
 											  HF_UI_TEXT_CENTER, 0.95f, 0.35f, 0.35f );
 		m_hud[ HF_UI_HUD_WAVE ]   = AddLabel( root, 16.0f, m_height - 42.0f, 300.0f, 24.0f, "WAVE 1/5", 1.25f,
 											  HF_UI_TEXT_LEFT, 0.5f, 0.75f, 1.0f );
+		m_hud[ HF_UI_HUD_AMMO ]   = AddLabel( root, 16.0f, 46.0f, 260.0f, 24.0f, "AMMO 12/12", 1.25f,
+											  HF_UI_TEXT_LEFT, 0.95f, 0.85f, 0.35f );
+		m_hud[ HF_UI_HUD_DODGE ]  = AddLabel( root, 16.0f, 72.0f, 260.0f, 24.0f, "DODGE READY", 1.25f,
+											  HF_UI_TEXT_LEFT, 0.35f, 0.85f, 0.95f );
+		m_hud[ HF_UI_HUD_COMBO ]  = AddLabel( root, m_width - 220.0f, 14.0f, 200.0f, 24.0f, "COMBO x1", 1.25f,
+											  HF_UI_TEXT_RIGHT, 0.95f, 0.55f, 0.85f );
+		m_hud[ HF_UI_HUD_KILLS ]  = AddLabel( root, m_width - 220.0f, 40.0f, 200.0f, 24.0f, "KILLS 0", 1.25f,
+											  HF_UI_TEXT_RIGHT, 0.75f, 0.75f, 0.80f );
 
 		AddButton( root, m_width - 150.0f, 14.0f, 134.0f, 34.0f, "PAUSE", HF_UI_ACTION_PAUSE );
 	}
@@ -994,6 +1011,15 @@ private:
 		snprintf( score, sizeof( score ), "SCORE %d", m_arena != NULL ? m_arena->score : 0 );
 		AddLabel( root, 0.0f, 190.0f, m_width, 28.0f, score, 1.75f,
 				  HF_UI_TEXT_CENTER, 0.8f, 0.8f, 0.85f );
+
+		char summary[ 192 ];
+		snprintf( summary, sizeof( summary ), "WAVE %d/%d   KILLS %d   BEST COMBO %d   AMMO %d",
+				  m_arena != NULL ? m_arena->wave : 0, HfArena::TOTAL_WAVES,
+				  m_arena != NULL ? m_arena->kills : 0,
+				  m_arena != NULL ? m_arena->bestCombo : 0,
+				  m_arena != NULL ? m_arena->ammo : 0 );
+		m_resultSummary = AddLabel( root, 0.0f, 228.0f, m_width, 28.0f, summary, 1.25f,
+									HF_UI_TEXT_CENTER, 0.65f, 0.70f, 0.78f );
 
 		AddButton( root, bx, 290.0f, 300.0f, 46.0f, "PLAY AGAIN", HF_UI_ACTION_START );
 		AddButton( root, bx, 350.0f, 300.0f, 46.0f, "MAIN MENU", HF_UI_ACTION_MAIN_MENU );
@@ -1028,6 +1054,22 @@ private:
 		SetLabelText( m_hud[ HF_UI_HUD_HEALTH ], buf );
 		snprintf( buf, sizeof( buf ), "WAVE %d/%d", wave, HfArena::TOTAL_WAVES );
 		SetLabelText( m_hud[ HF_UI_HUD_WAVE ], buf );
+
+		const int ammo = ( m_arena != NULL ) ? m_arena->ammo : HfArena::MAX_AMMO;
+		snprintf( buf, sizeof( buf ), "AMMO %d/%d", ammo, HfArena::MAX_AMMO );
+		SetLabelText( m_hud[ HF_UI_HUD_AMMO ], buf );
+
+		if ( m_arena != NULL && m_arena->dodgeCooldown > 0 ) {
+			snprintf( buf, sizeof( buf ), "DODGE %d", m_arena->dodgeCooldown );
+		} else {
+			snprintf( buf, sizeof( buf ), "DODGE READY" );
+		}
+		SetLabelText( m_hud[ HF_UI_HUD_DODGE ], buf );
+
+		snprintf( buf, sizeof( buf ), "COMBO x%d", ( m_arena != NULL ) ? m_arena->ComboMultiplier() : 1 );
+		SetLabelText( m_hud[ HF_UI_HUD_COMBO ], buf );
+		snprintf( buf, sizeof( buf ), "KILLS %d", ( m_arena != NULL ) ? m_arena->kills : 0 );
+		SetLabelText( m_hud[ HF_UI_HUD_KILLS ], buf );
 	}
 
 	void SetLabelText( HF_Ecs::Entity entity, const char *text ) {
@@ -1077,6 +1119,7 @@ private:
 	HF_Ecs::Entity		m_sfxSlider;
 	HF_Ecs::Entity		m_fullscreenToggle;
 	HF_Ecs::Entity		m_resultLabel;
+	HF_Ecs::Entity		m_resultSummary;
 	hfUiSaveSlots		m_saveSlots;
 	int					m_lastSaveSlot;
 	int					m_lastSaveKind;

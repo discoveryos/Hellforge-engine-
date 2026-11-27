@@ -31,7 +31,7 @@ release, so this fallback arena is the playable content today.
 | 02 | [Compiling](02-build.md) | Linux/Windows builds, plain, Jolt, real Python, dedicated/console options, troubleshooting |
 | 03 | [Running the engine](03-run.md) | Command line, console, cvars, startup flow, controls, maps |
 | 04 | [Scripting (hfscript, English, real Python)](04-scripting.md) | `.hfs` / `.py` / `.rb` / `.eng`, all `arena_*` hosts, AOT/JIT, optional CPython bridge |
-| 05 | [Making a game in C++](05-making-a-game-cpp.md) | Extending `HfArena`, consuming input, game DLL API, determinism rules |
+| 05 | [Making a game in C++](05-making-a-game-cpp.md) | `HfArenaGame` facade, consuming input, game DLL API, determinism rules |
 | 06 | [UI, input and drawing](06-ui-and-input.md) | Frontend states, widgets, HUD, gameplay input routing, draw-pass gate |
 | 07 | [Settings, saves and persistence](07-saves.md) | Per-account console storage, slots, save schema manifest, compatibility |
 | 08 | [Tests and the 4-way matrix](08-tests.md) | Harness, `Test_*`, plain/headless × default/Jolt, adding tests |

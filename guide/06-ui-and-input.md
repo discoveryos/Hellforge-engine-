@@ -63,9 +63,9 @@ and `SyncHud()`.
 - resets on **every** state transition via `ResetGameInput()`, so no command
   leaks across screens.
 
-The host polls `GetGameInput()` once per frame and will hand it to
-`HfArena::Step(cmd)` (implementation pending — see
-[chapter 05](05-making-a-game-cpp.md)).
+The frontend hands `GetGameInput()` to `HfArena::Step(cmd)` on each fixed
+60 Hz tick while PLAYING. PAUSED freezes the sim and clears the command;
+see [chapter 05](05-making-a-game-cpp.md) for the game-facing API.
 
 ## Drawing
 

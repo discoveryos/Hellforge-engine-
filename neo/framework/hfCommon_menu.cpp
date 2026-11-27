@@ -4,6 +4,7 @@
 #include "hfCommon_local.h"
 #include "../hflib/ui/hfUiFrontend.h"
 #include "../hflib/ui/hfUiSettings.h"
+#include "../hflib/game/hfArenaGame.h"
 #include "../hflib/game/hfArenaSave.h"
 #include "../renderer/hfUiDrawPass.h"
 
@@ -11,10 +12,6 @@
 // START falls back to the deterministic arena that ships with the frontend.
 static hfCVar ui_startMap( "ui_startMap", "", CVAR_ARCHIVE, "map to load when START is pressed" );
 static hfCVar ui_startDevMap( "ui_startDevMap", "0", CVAR_BOOL | CVAR_ARCHIVE, "load ui_startMap in developer mode" );
-
-// Engine-owned arena: the save/load policy has a concrete snapshot to write
-// when no real game module is installed (the harness and map-less checkouts).
-static HfArena						s_frontendArena;
 
 // Durable mirror of the options screen.  Loaded from the signed-in user's
 // console slot at boot; edits are written back and applied to live cvars.
@@ -193,8 +190,10 @@ void hfCommonLocal::InitFrontend() {
 		h = ( float )renderSystem->GetHeight();
 	}
 	uiFrontend->Init( *uiEventBus, w, h );
-	uiFrontend->SetArena( &s_frontendArena );
-	s_frontendArena.Reset( 1 );
+	// No real game module in a map-less checkout: use the reusable game
+	// facade's arena. A shipped module can replace this pointer at any time.
+	uiFrontend->SetArena( &HfArenaGame::Active() );
+	HfArenaGame::Start( 1 );
 	uiFrontend->SetActionHandler( HF_FrontendActionHandler, NULL );
 	hfUiDrawPass::SetSource( uiFrontend->RegistryPtr(), uiFrontend->SystemPtr() );
 	hfUiDrawPass::SetGameplayOverlay( uiFrontend->GetArena() );

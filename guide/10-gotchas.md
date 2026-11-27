@@ -48,15 +48,16 @@ want optimized Jolt builds.
 SSE2 flags and `Simd_SSE*.cpp` are skipped on ARM. Precompiled `.hfobj` files
 are endian-canonical precisely so they can move between x86_64 and aarch64.
 
-## 9. The input sampler is not wired to the sim yet
+## 9. Two Step() overloads mean two different games
 
-`HfArenaInput` and `HandleGameInput()` exist; `HfArena::Step(cmd)` does not.
-The arena still runs its autopilot. Don't expect WASD to move the player until
-game phase 3.
+`HfArena::Step()` (no arguments) is the legacy attack/retreat auto-pilot used
+by `arena.eng` and older tests. `HfArena::Step(cmd)` is the twin-stick gameplay
+path used by the frontend and `HfArenaGame`. Editing one does not change the
+other; update both when a rule should apply to both.
 
 ## 10. Never compare arena saves with `memcmp`
 
-`HfArenaEnemy` (12 bytes) and `HfArenaBullet` (20 bytes) have tail padding.
+`HfArenaEnemy`, `HfArenaBullet` and `HfArenaPickup` have tail padding.
 Use `hfArenaSave::Equals()` and keep every new field in `FieldKeys()`.
 
 ## 11. Harness tests cannot use renderer statics

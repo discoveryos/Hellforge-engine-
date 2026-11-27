@@ -128,8 +128,8 @@ workspace live in `/tmp/opencode/` and must be recreated on a fresh machine.
 - Run the 4-way harness matrix before committing code changes
   ([chapter 08](08-tests.md)).
 - Remember there are no `.map` assets or game DLL in this source release;
-  START falls back to the built-in arena. The input sampler is not yet wired
-  to the sim ([chapter 09](09-first-game.md)).
+  START uses the engine-owned built-in arena. Gameplay input is wired to the
+  sim ([chapter 09](09-first-game.md)).
 
 ## Where to go next
 

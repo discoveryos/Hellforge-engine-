@@ -136,6 +136,23 @@ static void DrawRoundedFill( float x, float y, float w, float h, float radius,
 // a centred square of the UI viewport.  This is intentionally plain quads —
 // it needs no assets and is a no-op in headless mode.  Ownership is explicit:
 // it draws only when the host installed an arena AND enabled it for PLAYING.
+static void EnemyColor( int kind, float &r, float &g, float &b ) {
+	switch ( kind ) {
+		case HF_ARENA_ENEMY_SPITTER:	r = 0.35f; g = 0.75f; b = 0.95f; break;
+		case HF_ARENA_ENEMY_BRUTE:		r = 0.70f; g = 0.35f; b = 0.85f; break;
+		case HF_ARENA_ENEMY_BOSS:		r = 1.00f; g = 0.25f; b = 0.55f; break;
+		default:						r = 0.85f; g = 0.20f; b = 0.20f; break;
+	}
+}
+
+static void PickupColor( int kind, float &r, float &g, float &b ) {
+	switch ( kind ) {
+		case HF_ARENA_PICKUP_HEALTH:	r = 0.30f; g = 0.95f; b = 0.45f; break;
+		case HF_ARENA_PICKUP_SCORE:		r = 0.95f; g = 0.55f; b = 0.95f; break;
+		default:						r = 0.95f; g = 0.85f; b = 0.25f; break;
+	}
+}
+
 static void DrawArenaOverlay( const HfArena &arena, float viewportW, float viewportH ) {
 	const float side = viewportW < viewportH ? viewportW : viewportH;
 	const float scale = side / 280.0f;		// ±120 world units plus margin
@@ -146,19 +163,44 @@ static void DrawArenaOverlay( const HfArena &arena, float viewportW, float viewp
 	GL_Color( 0.25f, 0.27f, 0.34f, 1.0f );
 	DrawQuad( ox - 120.0f * scale, oy - 120.0f * scale, 240.0f * scale, 240.0f * scale );
 
+	// Player, then a short facing pip so aim direction is visible.
 	GL_Color( 1.0f, 0.75f, 0.15f, 1.0f );
 	DrawQuad( ox + arena.playerX * scale - 3.0f, oy + arena.playerY * scale - 3.0f, 6.0f, 6.0f );
+	DrawQuad( ox + ( arena.playerX + arena.facingX * 7.0f ) * scale - 1.5f,
+			  oy + ( arena.playerY + arena.facingY * 7.0f ) * scale - 1.5f, 3.0f, 3.0f );
 
-	GL_Color( 0.85f, 0.20f, 0.20f, 1.0f );
-	for ( int i = 0; i < arena.enemyCount; i++ ) {
-		DrawQuad( ox + arena.enemies[ i ].x * scale - 2.5f,
-				  oy + arena.enemies[ i ].y * scale - 2.5f, 5.0f, 5.0f );
+	// Dodge i-frames are drawn as a larger translucent shell.
+	if ( arena.dodgeIFrames > 0 ) {
+		GL_Color( 0.35f, 0.85f, 1.0f, 0.45f );
+		DrawQuad( ox + arena.playerX * scale - 5.0f, oy + arena.playerY * scale - 5.0f, 10.0f, 10.0f );
 	}
 
-	GL_Color( 0.95f, 0.95f, 0.65f, 1.0f );
+	for ( int i = 0; i < arena.enemyCount; i++ ) {
+		const HfArenaEnemy &e = arena.enemies[ i ];
+		float r, g, b;
+		EnemyColor( e.kind, r, g, b );
+		GL_Color( r, g, b, 1.0f );
+		const float size = ( e.kind == HF_ARENA_ENEMY_BOSS ) ? 9.0f
+			: ( e.kind == HF_ARENA_ENEMY_BRUTE ) ? 6.0f : 5.0f;
+		DrawQuad( ox + e.x * scale - size * 0.5f, oy + e.y * scale - size * 0.5f, size, size );
+	}
+
 	for ( int i = 0; i < arena.bulletCount; i++ ) {
-		DrawQuad( ox + arena.bullets[ i ].x * scale - 1.0f,
-				  oy + arena.bullets[ i ].y * scale - 1.0f, 2.0f, 2.0f );
+		const HfArenaBullet &b = arena.bullets[ i ];
+		if ( b.team == HF_ARENA_BULLET_ENEMY ) {
+			GL_Color( 1.0f, 0.45f, 0.75f, 1.0f );
+		} else {
+			GL_Color( 0.95f, 0.95f, 0.65f, 1.0f );
+		}
+		DrawQuad( ox + b.x * scale - 1.0f, oy + b.y * scale - 1.0f, 2.0f, 2.0f );
+	}
+
+	for ( int i = 0; i < arena.pickupCount; i++ ) {
+		const HfArenaPickup &p = arena.pickups[ i ];
+		float r, g, b;
+		PickupColor( p.kind, r, g, b );
+		GL_Color( r, g, b, 1.0f );
+		DrawQuad( ox + p.x * scale - 2.0f, oy + p.y * scale - 2.0f, 4.0f, 4.0f );
 	}
 }
 

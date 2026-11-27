@@ -28,6 +28,7 @@
 #include "../../framework/zlib/hfzlib.h"
 #include "../HfScript.h"
 #include "../HfScript_Game.h"
+#include "../../hflib/game/hfArenaGame.h"
 #include "../../hflib/console/hfConsoleServices.h"
 #include "../../hflib/ui/hfUiBuilder.h"
 #include "../../hflib/ui/hfUiInput.h"
@@ -2866,6 +2867,7 @@ static void Test_UiFrontend();
 static void Test_UiPersistence();
 static void Test_FrontendIntegration();
 static void Test_RiskMitigations();
+static void Test_TwinStickArena();
 
 /*
 ================================
@@ -3235,6 +3237,7 @@ int HfTest_FeaturesMain() {
 	Test_UiPersistence();
 	Test_FrontendIntegration();
 	Test_RiskMitigations();
+	Test_TwinStickArena();
 	printf( "features logic: %s (%d failures)\n", g_featFails == 0 ? "ok" : "FAIL", g_featFails );
 	return g_featFails;
 }
@@ -4364,7 +4367,7 @@ static void Test_FrontendIntegration() {
 		char text[ hfArenaSave::HF_ARENA_SAVE_TEXT_MAX ];
 		const int length = snapshot.Serialize( text, sizeof( text ) );
 		FEAT_ASSERT( length > 0 && length < hfArenaSave::HF_ARENA_SAVE_TEXT_MAX );
-		FEAT_ASSERT( strstr( text, "version = 1" ) != NULL );
+		FEAT_ASSERT( strstr( text, "version = 2" ) != NULL );
 
 		hfArenaSave parsed;
 		FEAT_ASSERT( parsed.Parse( text ) );
@@ -4592,7 +4595,7 @@ static void Test_RiskMitigations() {
 		snap.Serialize( text, sizeof( text ) );
 		int count = 0;
 		const char * const * keys = hfArenaSave::FieldKeys( count );
-		FEAT_ASSERT( count >= 16 );
+		FEAT_ASSERT( count >= 29 );
 		for ( int i = 0; i < count; i++ ) {
 			FEAT_ASSERT( strstr( text, keys[ i ] ) != NULL );
 		}
@@ -4616,6 +4619,23 @@ static void Test_RiskMitigations() {
 		CHECK_FIELD( changed.enemies[ 0 ].hp++ );
 		CHECK_FIELD( changed.bullets[ 0 ].vx += 1.0f );
 		CHECK_FIELD( changed.bullets[ 0 ].life++ );
+		CHECK_FIELD( changed.facingX += 1.0f );
+		CHECK_FIELD( changed.facingY += 1.0f );
+		CHECK_FIELD( changed.pickupCount++ );
+		CHECK_FIELD( changed.ammo++ );
+		CHECK_FIELD( changed.dodgeCooldown++ );
+		CHECK_FIELD( changed.dodgeIFrames++ );
+		CHECK_FIELD( changed.rapidTicks++ );
+		CHECK_FIELD( changed.combo++ );
+		CHECK_FIELD( changed.bestCombo++ );
+		CHECK_FIELD( changed.comboTimer++ );
+		CHECK_FIELD( changed.kills++ );
+		CHECK_FIELD( changed.waveDelay++ );
+		CHECK_FIELD( changed.enemies[ 0 ].y += 1.0f );
+		CHECK_FIELD( changed.enemies[ 0 ].kind++ );
+		CHECK_FIELD( changed.bullets[ 0 ].team++ );
+		CHECK_FIELD( changed.pickups[ 0 ].kind++ );
+		CHECK_FIELD( changed.pickups[ 0 ].life++ );
 #undef CHECK_FIELD
 
 		hfArenaSave legacy;
@@ -4625,4 +4645,274 @@ static void Test_RiskMitigations() {
 
 	int added = g_featFails - fc;
 	printf( "phase 18 risk mitigations: %s\n", added ? "FAIL" : "ok" );
+}
+
+// Twin-stick arena phases 1-6: gameplay simulation, command routing,
+// presentation, persistence and the reusable game-facing API.
+static void Test_TwinStickArena() {
+	using namespace HF_Ui;
+	int fc = g_featFails;
+
+	HfScript_RegisterArenaHosts();
+
+	// (1) data model: a command produces deterministic, bounded state.
+	{
+		HfArena a, b;
+		a.Reset( 20260627 );
+		b.Reset( 20260627 );
+		FEAT_ASSERT( a.ammo == HfArena::MAX_AMMO );
+		FEAT_ASSERT( a.facingX == 0.0f && a.facingY == -1.0f );
+		FEAT_ASSERT( a.enemyCount > 0 );
+
+		HfArenaInput cmd;
+		cmd.moveX = 1.0f;
+		cmd.moveY = 1.0f;
+		cmd.aimX = 1.0f;
+		cmd.aimY = 0.0f;
+		cmd.fire = true;
+		for ( int i = 0; i < 20; i++ ) {
+			a.Step( cmd );
+			b.Step( cmd );
+		}
+		FEAT_ASSERT( a.ticks == b.ticks && a.score == b.score && a.rng == b.rng );
+		FEAT_ASSERT( a.playerX == b.playerX && a.playerY == b.playerY );
+		FEAT_ASSERT( a.ammo == b.ammo && a.kills == b.kills );
+		FEAT_NEAR( a.facingX, 1.0f, 1e-5f );
+		FEAT_NEAR( a.facingY, 0.0f, 1e-5f );
+		FEAT_ASSERT( a.ammo < HfArena::MAX_AMMO );
+
+		cmd.dodge = true;
+		a.Step( cmd );
+		FEAT_ASSERT( a.dodgeCooldown > 0 );
+		for ( int i = 0; i < 200; i++ ) { a.Step( cmd ); }
+		FEAT_ASSERT( a.playerX <= 120.0f && a.playerX >= -120.0f );
+		FEAT_ASSERT( a.playerY <= 120.0f && a.playerY >= -120.0f );
+		FEAT_ASSERT( a.bulletCount <= HfArena::MAX_BULLETS );
+		FEAT_ASSERT( a.pickupCount <= HfArena::MAX_PICKUPS );
+	}
+
+	// (2) gameplay rules: archetypes, boss wave, pickups, scoring and states.
+	{
+		HfArena boss;
+		boss.Reset( 3 );
+		boss.wave = HfArena::BOSS_WAVE - 1;
+		boss.SpawnWave();
+		FEAT_ASSERT( boss.wave == HfArena::BOSS_WAVE );
+		FEAT_ASSERT( boss.enemies[ 0 ].kind == HF_ARENA_ENEMY_BOSS );
+		FEAT_ASSERT( boss.enemies[ 0 ].hp > boss.enemies[ 1 ].hp );
+
+		HfArena spitter;
+		spitter.Reset( 4 );
+		spitter.playerX = 0.0f; spitter.playerY = 0.0f;
+		spitter.enemyCount = 1;
+		spitter.bulletCount = 0;
+		spitter.enemies[ 0 ].x = 50.0f; spitter.enemies[ 0 ].y = 0.0f;
+		spitter.enemies[ 0 ].hp = 20;
+		spitter.enemies[ 0 ].kind = HF_ARENA_ENEMY_SPITTER;
+		spitter.enemies[ 0 ].fireCooldown = 0;
+		HfArenaInput idle;
+		spitter.Step( idle );
+		bool enemyBullet = false;
+		for ( int i = 0; i < spitter.bulletCount; i++ ) {
+			enemyBullet = enemyBullet || spitter.bullets[ i ].team == HF_ARENA_BULLET_ENEMY;
+		}
+		FEAT_ASSERT( enemyBullet );
+
+		HfArena scored;
+		scored.Reset( 5 );
+		scored.enemyCount = 1;
+		scored.enemies[ 0 ].x = 12.0f; scored.enemies[ 0 ].y = 0.0f;
+		scored.enemies[ 0 ].hp = 1;
+		scored.enemies[ 0 ].kind = HF_ARENA_ENEMY_CHASER;
+		scored.combo = 5;
+		HfArenaInput shoot;
+		shoot.aimX = 1.0f; shoot.aimY = 0.0f;
+		shoot.fire = true;
+		scored.Step( shoot );
+		FEAT_ASSERT( scored.kills == 1 );
+		FEAT_ASSERT( scored.score >= 20 );		// base 10 x combo multiplier 2
+
+		HfArena hurt;
+		hurt.Reset( 6 );
+		hurt.enemyCount = 1;
+		hurt.enemies[ 0 ].x = 0.0f; hurt.enemies[ 0 ].y = 0.0f;
+		hurt.enemies[ 0 ].hp = 20;
+		hurt.enemies[ 0 ].kind = HF_ARENA_ENEMY_BRUTE;
+		hurt.Step( idle );
+		FEAT_ASSERT( hurt.hitPoints == HfArena::PLAYER_HITPOINTS - 20 );
+
+		HfArena dodge;
+		dodge.Reset( 6 );
+		dodge.enemyCount = 1;
+		dodge.enemies[ 0 ].x = dodge.playerX; dodge.enemies[ 0 ].y = dodge.playerY;
+		dodge.enemies[ 0 ].hp = 20;
+		dodge.enemies[ 0 ].kind = HF_ARENA_ENEMY_BRUTE;
+		HfArenaInput roll;
+		roll.dodge = true;
+		roll.aimX = 0.0f; roll.aimY = -1.0f;
+		dodge.Step( roll );
+		FEAT_ASSERT( dodge.hitPoints == HfArena::PLAYER_HITPOINTS );
+		FEAT_ASSERT( dodge.dodgeIFrames > 0 );
+
+		HfArena win;
+		win.Reset( 7 );
+		win.wave = HfArena::TOTAL_WAVES;
+		win.enemyCount = 0;
+		win.waveDelay = 1;
+		win.Step( idle );
+		FEAT_ASSERT( win.gameOver && win.won );
+	}
+
+	// (3) input plumbing: the frontend feeds its sampled command to Step().
+	{
+		HF_Ecs::EventBus bus;
+		hfUiFrontend fe;
+		HfArena arena;
+		arena.Reset( 11 );
+		fe.SetArena( &arena );
+		fe.Init( bus, 1024.0f, 768.0f );
+		fe.SetState( hfUiFrontend::HF_UI_FRONTEND_PLAYING );
+
+		sysEvent_t key;
+		memset( &key, 0, sizeof( key ) );
+		key.evType = SE_KEY;
+		key.evValue = K_D; key.evValue2 = 1;
+		FEAT_ASSERT( fe.HandleGameInput( key ) );
+		key.evValue = K_MOUSE1;
+		FEAT_ASSERT( fe.HandleGameInput( key ) );
+		const int ammoBefore = arena.ammo;
+		fe.Update( 1.0f / 60.0f );
+		FEAT_ASSERT( arena.playerX > 0.0f );
+		FEAT_ASSERT( arena.ammo < ammoBefore );
+		FEAT_ASSERT( fe.GetGameInput().fire );
+
+		key.evValue = K_SPACE; key.evValue2 = 1;
+		FEAT_ASSERT( fe.HandleGameInput( key ) );
+		fe.Update( 1.0f / 60.0f );
+		FEAT_ASSERT( arena.dodgeCooldown > 0 );
+
+		auto labelText = [ & ]( HF_Ecs::Entity e ) -> const char * {
+			hfUiLabelComponent *l = fe.RegistryPtr()->GetComponent< hfUiLabelComponent >( e );
+			return l != NULL ? l->text : "";
+		};
+
+		// (4) presentation: extended HUD and results summary.
+		arena.score = 77;
+		arena.ammo = 5;
+		arena.dodgeCooldown = 12;
+		arena.combo = 6;
+		arena.kills = 9;
+		fe.Update( 0.0f );
+		FEAT_ASSERT( strcmp( labelText( fe.GetHudLabel( hfUiFrontend::HF_UI_HUD_AMMO ) ), "AMMO 5/12" ) == 0 );
+		FEAT_ASSERT( strcmp( labelText( fe.GetHudLabel( hfUiFrontend::HF_UI_HUD_DODGE ) ), "DODGE 12" ) == 0 );
+		FEAT_ASSERT( strcmp( labelText( fe.GetHudLabel( hfUiFrontend::HF_UI_HUD_COMBO ) ), "COMBO x2" ) == 0 );
+		FEAT_ASSERT( strcmp( labelText( fe.GetHudLabel( hfUiFrontend::HF_UI_HUD_KILLS ) ), "KILLS 9" ) == 0 );
+
+		arena.hitPoints = 0;
+		arena.gameOver = true;
+		arena.won = true;
+		fe.Update( 0.0f );
+		FEAT_ASSERT( fe.GetState() == hfUiFrontend::HF_UI_FRONTEND_RESULTS );
+		FEAT_ASSERT( fe.GetResultSummaryLabel() != HF_Ecs::ENTITY_NULL );
+		FEAT_ASSERT( strstr( labelText( fe.GetResultSummaryLabel() ), "KILLS 9" ) != NULL );
+		FEAT_ASSERT( strstr( labelText( fe.GetResultSummaryLabel() ), "BEST COMBO" ) != NULL );
+	}
+
+	// (5) persistence: v2 round trip, v1 compatibility, replay after load.
+	{
+		HfArena source;
+		source.Reset( 21 );
+		HfArenaInput cmd;
+		cmd.moveX = 1.0f;
+		cmd.aimX = 1.0f;
+		cmd.fire = true;
+		for ( int i = 0; i < 30; i++ ) { source.Step( cmd ); }
+
+		hfArenaSave snap;
+		snap.Capture( source );
+		FEAT_ASSERT( snap.SchemaRoundTrip() );
+		char text[ hfArenaSave::HF_ARENA_SAVE_TEXT_MAX ];
+		const int length = snap.Serialize( text, sizeof( text ) );
+		FEAT_ASSERT( length > 0 && length < hfArenaSave::HF_ARENA_SAVE_TEXT_MAX );
+		FEAT_ASSERT( strstr( text, "version = 2" ) != NULL );
+		FEAT_ASSERT( strstr( text, "pickups =" ) != NULL );
+		FEAT_ASSERT( strstr( text, "ammo =" ) != NULL );
+
+		hfArenaSave parsed;
+		FEAT_ASSERT( parsed.Parse( text ) && parsed.Equals( snap ) );
+		HfArena restored;
+		restored.Reset( 999 );
+		FEAT_ASSERT( parsed.Restore( restored ) );
+		for ( int i = 0; i < 10; i++ ) {
+			source.Step( cmd );
+			restored.Step( cmd );
+		}
+		hfArenaSave replayA, replayB;
+		replayA.Capture( source );
+		replayB.Capture( restored );
+		FEAT_ASSERT( replayA.Equals( replayB ) );
+
+		// A v1 slot has no new keys; defaults must make it playable again.
+		const char *legacyText =
+			"version = 1\n"
+			"score = 42\n"
+			"enemy_count = 1\n"
+			"enemies = 00000000,1\n"
+			"bullets = 00000000,00000000,00000000,00000000,0\n";
+		hfArenaSave legacy;
+		FEAT_ASSERT( legacy.Parse( legacyText ) );
+		FEAT_ASSERT( legacy.score == 42 && legacy.enemyCount == 1 );
+		FEAT_ASSERT( legacy.enemies[ 0 ].kind == HF_ARENA_ENEMY_CHASER );
+		FEAT_ASSERT( legacy.enemies[ 0 ].y == 0.0f );
+		FEAT_ASSERT( legacy.bullets[ 0 ].team == HF_ARENA_BULLET_PLAYER );
+		FEAT_ASSERT( legacy.ammo == HfArena::MAX_AMMO );
+		HfArena legacyArena;
+		FEAT_ASSERT( legacy.Restore( legacyArena ) );
+		HfArenaInput idle;
+		legacyArena.Step( idle );
+		FEAT_ASSERT( legacyArena.ticks == 1 );
+	}
+
+	// (6) reusable game API: game code and hfscript share one engine instance.
+	{
+		HfArenaGame::Start( 71 );
+		HfArenaInput cmd;
+		cmd.aimX = 1.0f; cmd.aimY = 0.0f;
+		cmd.fire = true;
+		HfArenaGame::Run( cmd, 20 );
+		FEAT_ASSERT( HfArenaGame::Active().ticks == 20 );
+		FEAT_ASSERT( HfArenaGame::Score() == HfArenaGame::Active().score );
+		FEAT_ASSERT( HfArenaGame::Ammo() < HfArena::MAX_AMMO );
+
+		const char *script =
+			"define main\n"
+			"    arena_reset(71)\n"
+			"    arena_set_move(1, 0)\n"
+			"    arena_set_aim(1, 0)\n"
+			"    arena_set_fire(1)\n"
+			"    repeat 20 times\n"
+			"        arena_step_cmd()\n"
+			"    arena_clear_command()\n"
+			"main()\n";
+		HfScriptProgram prog;
+		HfScriptVM vm;
+		const bool compiled = HfScript_Compile( &prog, script, "cmd.eng" );
+		if ( !compiled ) {
+			printf( "ARENA CMD COMPILE FAIL: %s(%d): %s\n", prog.error.c_str(), prog.errorLine, prog.error.c_str() );
+		}
+		FEAT_ASSERT( compiled );
+		if ( compiled ) {
+			const bool ran = vm.RunProgram( &prog );
+			if ( !ran ) {
+				printf( "ARENA CMD RUN FAIL line %d: %s\n", vm.lastErrorLine, vm.lastError.c_str() );
+			}
+			FEAT_ASSERT( ran );
+			FEAT_ASSERT( hfgame::Arena().ticks == 20 );
+			FEAT_ASSERT( !HfArenaGame::Command().fire );
+			FEAT_ASSERT( HfArenaGame::Ammo() < HfArena::MAX_AMMO );
+		}
+	}
+
+	int added = g_featFails - fc;
+	printf( "twin-stick arena phases 1-6: %s\n", added ? "FAIL" : "ok" );
 }
