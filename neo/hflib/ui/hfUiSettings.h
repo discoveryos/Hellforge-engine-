@@ -55,6 +55,7 @@ struct hfUiSettings {
 	int		quality;
 	bool	fullscreen;
 	bool	vsync;
+	bool	colorblindMode;
 
 	hfUiSettings() { SetDefaults(); }
 
@@ -67,6 +68,7 @@ struct hfUiSettings {
 		quality = 2;
 		fullscreen = false;
 		vsync = true;
+		colorblindMode = false;
 	}
 
 	int Serialize( char *out, int maxSize ) const {
@@ -79,9 +81,10 @@ struct hfUiSettings {
 				  "height = %d\n"
 				  "quality = %d\n"
 				  "fullscreen = %d\n"
-				  "vsync = %d\n",
+				  "vsync = %d\n"
+				  "colorblind_mode = %d\n",
 				  musicVolume, sfxVolume, mouseSensitivity, width, height, quality,
-				  fullscreen ? 1 : 0, vsync ? 1 : 0 );
+				  fullscreen ? 1 : 0, vsync ? 1 : 0, colorblindMode ? 1 : 0 );
 		return ( int )strlen( out );
 	}
 
@@ -118,6 +121,7 @@ struct hfUiSettings {
 			else if ( strcmp( key, "quality" ) == 0 ) { quality = atoi( value ); recognized++; }
 			else if ( strcmp( key, "fullscreen" ) == 0 ) { fullscreen = atoi( value ) != 0; recognized++; }
 			else if ( strcmp( key, "vsync" ) == 0 ) { vsync = atoi( value ) != 0; recognized++; }
+			else if ( strcmp( key, "colorblind_mode" ) == 0 ) { colorblindMode = atoi( value ) != 0; recognized++; }
 		}
 
 		Clamp();
@@ -142,12 +146,14 @@ struct hfUiSettings {
 		frontend.SetMusicVolume( musicVolume );
 		frontend.SetSfxVolume( sfxVolume );
 		frontend.SetFullscreen( fullscreen );
+		frontend.SetColorblindMode( colorblindMode );
 	}
 
 	void ReadFrom( const hfUiFrontend &frontend ) {
 		musicVolume = frontend.GetMusicVolume();
 		sfxVolume = frontend.GetSfxVolume();
 		fullscreen = frontend.GetFullscreen();
+		colorblindMode = frontend.GetColorblindMode();
 		Clamp();
 	}
 

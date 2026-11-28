@@ -118,10 +118,12 @@ public:
 		m_musicSlider = HF_Ecs::ENTITY_NULL;
 		m_sfxSlider = HF_Ecs::ENTITY_NULL;
 		m_fullscreenToggle = HF_Ecs::ENTITY_NULL;
+		m_colorblindToggle = HF_Ecs::ENTITY_NULL;
 		for ( int i = 0; i < HF_UI_HUD_COUNT; i++ ) { m_hud[ i ] = HF_Ecs::ENTITY_NULL; }
 		m_musicVolume = 70.0f;
 		m_sfxVolume = 85.0f;
 		m_fullscreen = false;
+		m_colorblindMode = false;
 		m_lastSaveSlot = -1;
 		m_lastSaveKind = -1;
 		m_pendingBindRow = -1;
@@ -222,6 +224,7 @@ public:
 	float	GetMusicVolume() const { return m_musicVolume; }
 	float	GetSfxVolume() const { return m_sfxVolume; }
 	bool	GetFullscreen() const { return m_fullscreen; }
+	bool	GetColorblindMode() const { return m_colorblindMode; }
 
 	void SetMusicVolume( float v ) {
 		m_musicVolume = v;
@@ -234,6 +237,13 @@ public:
 	void SetFullscreen( bool on ) {
 		m_fullscreen = on;
 		if ( m_state == HF_UI_FRONTEND_MENU ) { SetState( HF_UI_FRONTEND_MENU ); }
+	}
+	void SetColorblindMode( bool on ) {
+		m_colorblindMode = on;
+		m_theme.SetDefaults();
+		if ( m_colorblindMode ) { m_theme.SetPaletteMode( 1 ); }
+		if ( m_state == HF_UI_FRONTEND_MENU ) { SetState( HF_UI_FRONTEND_MENU ); }
+		else { m_theme.Apply( m_registry ); }
 	}
 
 	// --- theme ------------------------------------------------------------
@@ -586,6 +596,11 @@ private:
 				m_sfxVolume = ev->valueF;
 			} else if ( ev->entity == m_fullscreenToggle ) {
 				m_fullscreen = ev->valueI != 0;
+			} else if ( ev->entity == m_colorblindToggle ) {
+				m_colorblindMode = ev->valueI != 0;
+				m_theme.SetDefaults();
+				if ( m_colorblindMode ) { m_theme.SetPaletteMode( 1 ); }
+				m_theme.Apply( m_registry );
 			}
 		}
 	}
@@ -932,7 +947,11 @@ private:
 		m_fullscreenToggle = hfUiBuilder::CreateToggle( m_registry, root, controlX, 256.0f,
 														controlW, 28.0f, "ENABLED", m_fullscreen );
 
-		AddLabel( root, 0.0f, 300.0f, m_width, 24.0f, "KEY BINDINGS", 1.25f,
+		AddLabel( root, labelX, 302.0f, 160.0f, 28.0f, "COLORBLIND", 1.5f, HF_UI_TEXT_LEFT );
+		m_colorblindToggle = hfUiBuilder::CreateToggle( m_registry, root, controlX, 300.0f,
+														 controlW, 28.0f, "ENABLED", m_colorblindMode );
+
+		AddLabel( root, 0.0f, 344.0f, m_width, 24.0f, "KEY BINDINGS", 1.25f,
 				  HF_UI_TEXT_CENTER, 0.95f, 0.55f, 0.15f );
 
 		m_keybindRowCount = 0;
@@ -1110,6 +1129,7 @@ private:
 	float				m_musicVolume;
 	float				m_sfxVolume;
 	bool				m_fullscreen;
+	bool				m_colorblindMode;
 
 	hfUiTheme			m_theme;
 
@@ -1118,6 +1138,7 @@ private:
 	HF_Ecs::Entity		m_musicSlider;
 	HF_Ecs::Entity		m_sfxSlider;
 	HF_Ecs::Entity		m_fullscreenToggle;
+	HF_Ecs::Entity		m_colorblindToggle;
 	HF_Ecs::Entity		m_resultLabel;
 	HF_Ecs::Entity		m_resultSummary;
 	hfUiSaveSlots		m_saveSlots;

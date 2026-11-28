@@ -7,10 +7,11 @@
 #include "../hflib/game/hfArenaGame.h"
 #include "../hflib/game/hfArenaSave.h"
 #include "../renderer/hfUiDrawPass.h"
+#include "hfArenaStubGame.h"
 
-// A real map is selected by the host, not baked into the UI.  When empty,
-// START falls back to the deterministic arena that ships with the frontend.
-static hfCVar ui_startMap( "ui_startMap", "", CVAR_ARCHIVE, "map to load when START is pressed" );
+// Real map path: START loads this map through the session command path.
+// The shipped arena.proc keeps the prototype playable without a dmap compiler.
+static hfCVar ui_startMap( "ui_startMap", "maps/arena", CVAR_ARCHIVE, "map to load when START is pressed" );
 static hfCVar ui_startDevMap( "ui_startDevMap", "0", CVAR_BOOL | CVAR_ARCHIVE, "load ui_startMap in developer mode" );
 
 // Durable mirror of the options screen.  Loaded from the signed-in user's
@@ -19,6 +20,7 @@ static HF_Ui::hfUiSettings	s_frontendSettings;
 static float				s_frontendMusic = -1.0f;
 static float				s_frontendSfx = -1.0f;
 static bool					s_frontendFullscreen = false;
+static bool					s_frontendColorblind = false;
 
 /*
 ==============
@@ -126,6 +128,10 @@ static void HF_FrontendActionHandler( int action, void * /*user*/ ) {
 			// ExecuteMapChange(), which owns the LOADING -> PLAYING switch.
 			const char *mapName = ui_startMap.GetString();
 			if ( mapName != NULL && mapName[ 0 ] != '\0' ) {
+				if ( game == NULL ) {
+					game = &HfArenaStubGameInstance();
+					game->Init();
+				}
 				char command[ 256 ];
 				snprintf( command, sizeof( command ), "%s %s\n",
 						  ui_startDevMap.GetBool() ? "devmap" : "map", mapName );
@@ -209,6 +215,8 @@ void hfCommonLocal::InitFrontend() {
 	s_frontendMusic = s_frontendSettings.musicVolume;
 	s_frontendSfx = s_frontendSettings.sfxVolume;
 	s_frontendFullscreen = s_frontendSettings.fullscreen;
+	s_frontendColorblind = s_frontendSettings.colorblindMode;
+	hfUiDrawPass::SetColorblindMode( s_frontendColorblind );
 }
 
 /*
@@ -261,12 +269,15 @@ void hfCommonLocal::FrontendFrame() {
 		const float music = uiFrontend->GetMusicVolume();
 		const float sfx = uiFrontend->GetSfxVolume();
 		const bool fullscreen = uiFrontend->GetFullscreen();
-		if ( music != s_frontendMusic || sfx != s_frontendSfx || fullscreen != s_frontendFullscreen ) {
+		const bool colorblind = uiFrontend->GetColorblindMode();
+		if ( music != s_frontendMusic || sfx != s_frontendSfx || fullscreen != s_frontendFullscreen || colorblind != s_frontendColorblind ) {
 			s_frontendMusic = music;
 			s_frontendSfx = sfx;
 			s_frontendFullscreen = fullscreen;
+			s_frontendColorblind = colorblind;
 			s_frontendSettings.ReadFrom( *uiFrontend );
 			s_frontendSettings.ApplyToCVars();
+			hfUiDrawPass::SetColorblindMode( s_frontendColorblind );
 			hfconsole::hfConsoleServices *services = hfconsole::HfConsole_GetServices();
 			if ( services != NULL ) {
 				s_frontendSettings.SaveToSlot( services, services->GetUserId( 0 ) );

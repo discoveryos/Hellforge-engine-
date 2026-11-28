@@ -9,6 +9,7 @@ HF_Ecs::Registry *	hfUiDrawPass::s_registry = NULL;
 HF_Ui::hfUiSystem *	hfUiDrawPass::s_system = NULL;
 HfArena *			hfUiDrawPass::s_arena = NULL;
 bool					hfUiDrawPass::s_gameplayOverlayEnabled = false;
+bool					hfUiDrawPass::s_colorblindMode = false;
 
 // Text overlay scratch: the labels are rasterized into an 8-bit coverage
 // buffer and uploaded as a single intensity texture.  One upload per frame is
@@ -136,7 +137,16 @@ static void DrawRoundedFill( float x, float y, float w, float h, float radius,
 // a centred square of the UI viewport.  This is intentionally plain quads —
 // it needs no assets and is a no-op in headless mode.  Ownership is explicit:
 // it draws only when the host installed an arena AND enabled it for PLAYING.
-static void EnemyColor( int kind, float &r, float &g, float &b ) {
+static void EnemyColor( int kind, bool cb, float &r, float &g, float &b ) {
+	if ( cb ) {
+		switch ( kind ) {
+			case HF_ARENA_ENEMY_SPITTER:	r = 0.20f; g = 0.75f; b = 0.95f; break;
+			case HF_ARENA_ENEMY_BRUTE:		r = 0.60f; g = 0.45f; b = 0.95f; break;
+			case HF_ARENA_ENEMY_BOSS:		r = 0.95f; g = 0.60f; b = 0.10f; break;
+			default:						r = 0.90f; g = 0.75f; b = 0.20f; break;
+		}
+		return;
+	}
 	switch ( kind ) {
 		case HF_ARENA_ENEMY_SPITTER:	r = 0.35f; g = 0.75f; b = 0.95f; break;
 		case HF_ARENA_ENEMY_BRUTE:		r = 0.70f; g = 0.35f; b = 0.85f; break;
@@ -145,7 +155,15 @@ static void EnemyColor( int kind, float &r, float &g, float &b ) {
 	}
 }
 
-static void PickupColor( int kind, float &r, float &g, float &b ) {
+static void PickupColor( int kind, bool cb, float &r, float &g, float &b ) {
+	if ( cb ) {
+		switch ( kind ) {
+			case HF_ARENA_PICKUP_HEALTH:	r = 0.20f; g = 0.85f; b = 0.95f; break;
+			case HF_ARENA_PICKUP_SCORE:		r = 0.95f; g = 0.80f; b = 0.20f; break;
+			default:						r = 0.80f; g = 0.80f; b = 0.95f; break;
+		}
+		return;
+	}
 	switch ( kind ) {
 		case HF_ARENA_PICKUP_HEALTH:	r = 0.30f; g = 0.95f; b = 0.45f; break;
 		case HF_ARENA_PICKUP_SCORE:		r = 0.95f; g = 0.55f; b = 0.95f; break;
@@ -154,14 +172,30 @@ static void PickupColor( int kind, float &r, float &g, float &b ) {
 }
 
 static void DrawArenaOverlay( const HfArena &arena, float viewportW, float viewportH ) {
+	const bool cb = hfUiDrawPass::GetColorblindMode();
 	const float side = viewportW < viewportH ? viewportW : viewportH;
 	const float scale = side / 280.0f;		// ±120 world units plus margin
-	const float ox = viewportW * 0.5f;
-	const float oy = viewportH * 0.5f;
+	float shakeX = 0.0f, shakeY = 0.0f;
+	HfArena::HfArenaFxState::ShakeOffset( arena.fx.shakeTicks, arena.fx.shakeTicks, 18, shakeX, shakeY );
+	const float ox = viewportW * 0.5f + shakeX;
+	const float oy = viewportH * 0.5f + shakeY;
 
 	// Arena bounds.
 	GL_Color( 0.25f, 0.27f, 0.34f, 1.0f );
 	DrawQuad( ox - 120.0f * scale, oy - 120.0f * scale, 240.0f * scale, 240.0f * scale );
+
+	// Boss telegraph: pulse on boss-wave warning events.
+	for ( int i = 0; i < arena.fx.eventCount; i++ ) {
+		const HfArena::HfArenaFxEvent &ev = arena.fx.events[ i ];
+		if ( ev.life <= 0 || ev.type != HfArena::FX_BOSS_WARNING ) continue;
+		const float t = ( float )ev.life / ( float )ev.maxLife;
+		const float r = ( 1.0f - t ) * 80.0f * scale;
+		GL_Color( cb ? 0.95f : 1.0f, cb ? 0.70f : 0.25f, cb ? 0.10f : 0.25f, t * 0.25f );
+		DrawQuad( ox - r, oy - r, r * 2.0f, 3.0f );
+		DrawQuad( ox - r, oy + r - 3.0f, r * 2.0f, 3.0f );
+		DrawQuad( ox - r, oy - r, 3.0f, r * 2.0f );
+		DrawQuad( ox + r - 3.0f, oy - r, 3.0f, r * 2.0f );
+	}
 
 	// Player, then a short facing pip so aim direction is visible.
 	GL_Color( 1.0f, 0.75f, 0.15f, 1.0f );
@@ -178,7 +212,7 @@ static void DrawArenaOverlay( const HfArena &arena, float viewportW, float viewp
 	for ( int i = 0; i < arena.enemyCount; i++ ) {
 		const HfArenaEnemy &e = arena.enemies[ i ];
 		float r, g, b;
-		EnemyColor( e.kind, r, g, b );
+		EnemyColor( e.kind, cb, r, g, b );
 		GL_Color( r, g, b, 1.0f );
 		const float size = ( e.kind == HF_ARENA_ENEMY_BOSS ) ? 9.0f
 			: ( e.kind == HF_ARENA_ENEMY_BRUTE ) ? 6.0f : 5.0f;
@@ -188,7 +222,7 @@ static void DrawArenaOverlay( const HfArena &arena, float viewportW, float viewp
 	for ( int i = 0; i < arena.bulletCount; i++ ) {
 		const HfArenaBullet &b = arena.bullets[ i ];
 		if ( b.team == HF_ARENA_BULLET_ENEMY ) {
-			GL_Color( 1.0f, 0.45f, 0.75f, 1.0f );
+			GL_Color( cb ? 0.95f : 1.0f, cb ? 0.55f : 0.45f, cb ? 0.10f : 0.75f, 1.0f );
 		} else {
 			GL_Color( 0.95f, 0.95f, 0.65f, 1.0f );
 		}
@@ -198,9 +232,59 @@ static void DrawArenaOverlay( const HfArena &arena, float viewportW, float viewp
 	for ( int i = 0; i < arena.pickupCount; i++ ) {
 		const HfArenaPickup &p = arena.pickups[ i ];
 		float r, g, b;
-		PickupColor( p.kind, r, g, b );
+		PickupColor( p.kind, cb, r, g, b );
 		GL_Color( r, g, b, 1.0f );
 		DrawQuad( ox + p.x * scale - 2.0f, oy + p.y * scale - 2.0f, 4.0f, 4.0f );
+	}
+
+	// FX events: muzzle flashes, hits, pickups, dodge/wave markers.
+	for ( int i = 0; i < arena.fx.eventCount; i++ ) {
+		const HfArena::HfArenaFxEvent &ev = arena.fx.events[ i ];
+		if ( ev.life <= 0 ) continue;
+		const float t = ( float )ev.life / ( float )ev.maxLife;
+		const float px = ox + ev.x * scale;
+		const float py = oy + ev.y * scale;
+		if ( ev.type == HfArena::FX_MUZZLE ) {
+			GL_Color( 1.0f, 0.95f, 0.65f, t * 0.9f );
+			DrawQuad( px - 2.0f, py - 2.0f, 4.0f, 4.0f );
+		} else if ( ev.type == HfArena::FX_HIT ) {
+			GL_Color( 1.0f, cb ? 0.80f : 0.55f, cb ? 0.20f : 0.25f, t * 0.8f );
+			DrawQuad( px - 2.5f, py - 0.5f, 5.0f, 1.0f );
+			DrawQuad( px - 0.5f, py - 2.5f, 1.0f, 5.0f );
+		} else if ( ev.type == HfArena::FX_PICKUP ) {
+			GL_Color( cb ? 0.20f : 0.30f, cb ? 0.85f : 0.95f, cb ? 0.95f : 0.45f, t * 0.5f );
+			DrawQuad( px - 4.0f, py - 4.0f, 8.0f, 8.0f );
+		} else if ( ev.type == HfArena::FX_DODGE ) {
+			GL_Color( 0.35f, 0.85f, 1.0f, t * 0.35f );
+			DrawQuad( px - 6.0f, py - 6.0f, 12.0f, 12.0f );
+		} else if ( ev.type == HfArena::FX_WAVE ) {
+			GL_Color( 1.0f, 1.0f, 1.0f, t * 0.15f );
+			DrawQuad( ox - 120.0f * scale, oy - 120.0f * scale, 240.0f * scale, 240.0f * scale );
+		}
+	}
+
+	// Particles.
+	for ( int i = 0; i < arena.fx.particleCount; i++ ) {
+		const HfArena::HfArenaFxParticle &p = arena.fx.particles[ i ];
+		if ( p.life <= 0 ) continue;
+		const float t = ( float )p.life / ( float )p.maxLife;
+		float r = 1.0f, g = 1.0f, b = 1.0f;
+		if ( p.kind == HfArena::FX_HURT ) { r = 1.0f; g = cb ? 0.75f : 0.30f; b = cb ? 0.20f : 0.30f; }
+		else if ( p.kind == HfArena::FX_DODGE ) { r = 0.35f; g = 0.85f; b = 1.0f; }
+		else if ( p.kind == HfArena::FX_PICKUP || p.kind == HF_ARENA_PICKUP_HEALTH || p.kind == HF_ARENA_PICKUP_AMMO || p.kind == HF_ARENA_PICKUP_SCORE ) { PickupColor( p.kind == HfArena::FX_PICKUP ? HF_ARENA_PICKUP_AMMO : p.kind, cb, r, g, b ); }
+		else { EnemyColor( p.kind, cb, r, g, b ); }
+		GL_Color( r, g, b, t * 0.8f );
+		DrawQuad( ox + p.x * scale - 1.5f, oy + p.y * scale - 1.5f, 3.0f, 3.0f );
+	}
+
+	// Damage vignette.
+	const float vig = HfArena::HfArenaFxState::VignetteAlpha( arena.fx.damageFlash );
+	if ( vig > 0.0f ) {
+		GL_Color( cb ? 0.90f : 0.80f, cb ? 0.55f : 0.10f, cb ? 0.10f : 0.10f, vig * 0.30f );
+		DrawQuad( 0.0f, 0.0f, viewportW, 24.0f );
+		DrawQuad( 0.0f, viewportH - 24.0f, viewportW, 24.0f );
+		DrawQuad( 0.0f, 0.0f, 24.0f, viewportH );
+		DrawQuad( viewportW - 24.0f, 0.0f, 24.0f, viewportH );
 	}
 }
 

@@ -1,7 +1,9 @@
 # Twin-stick Arena — design & implementation plan
 
-**Status:** phases 1–6 implemented in the engine, exposed through reusable
-game-facing APIs (see sections 4.2 and 5).
+**Status:** phases 1–6 implemented; follow-up pass added minimal real map/module
+path (`ui_startMap` default `maps/arena`, `hfArenaStubGame`, hand-authored
+`base/maps/arena.proc`), pure deterministic SFX cues, and presentation-only
+visual juice/colorblind palettes (see sections 4.2, 5 and follow-up notes).
 **Target:** the first playable game built on the Phase 9–18 engine substrate.
 **Definition of done:** start the engine, land on TITLE, press PLAY, steer and
 shoot with mouse/keyboard or gamepad, survive escalating waves, pause/resume,
@@ -35,11 +37,13 @@ game”, and every step is testable headlessly.
 | Draw pass | `neo/renderer/hfUiDrawPass.cpp` | pixel-space quads, coverage text, rounded/nine-patch panels |
 | Tests | `neo/script/tests/hfstest_features.cpp` | `Test_Game`, `Test_UiFrontend`, `Test_UiPersistence`, `Test_FrontendIntegration` |
 
-**Constraints from the current checkout:** no `.map` assets and no game DLL, so
-the boot path intentionally uses the engine-owned `HfArenaGame::Active()`
-arena. Phase 6 delivers the reusable game-facing API rather than content; a
-real map becomes possible once `ui_startMap` names one and a game module is
-installed.
+**Constraints from the current checkout:** no dmap compiler and no external game
+DLL are shipped. The checkout now includes a minimal hand-authored
+`base/maps/arena.proc`/`.map` placeholder and a built-in `hfArenaStubGame` so
+`ui_startMap` can take the real session map-load path when no game module is
+installed. Full shipped content still requires compiled map assets and a real
+game module; the engine-owned `HfArenaGame::Active()` remains the deterministic
+simulation facade.
 
 ## 3. Gameplay design
 
@@ -218,8 +222,37 @@ default/Jolt) and ends with both engine binaries rebuilt.
 `Test_RiskMitigations()` joins the harness suite: `ALL PASSED`, plain and
 `--headless`, default and Jolt (4/4 matrix). Both engine binaries rebuilt.
 
-## 8. Non-goals for this project
+## 8. Follow-up: real map/module path, SFX, and visual juice
+
+- **Real map/module path (minimal):** `ui_startMap` defaults to `maps/arena`.
+  When START is pressed and no `hfGame` is installed, the host installs a
+  minimal built-in `hfArenaStubGame` (`neo/framework/hfArenaStubGame.h`) that
+  implements the required `hfGame` surface and keeps the arena running through
+  the normal session command/map-load path. `base/maps/arena.proc` is a
+  hand-authored minimal `mapProcFile003` placeholder; `base/maps/arena.map`
+  documents the map name. This is a prototype path, not a replacement for a
+  dmap-compiled shipped map or a full external game DLL.
+- **Gameplay SFX:** `neo/hflib/audio/hfArenaSfx.h/.cpp` provides pure,
+  deterministic cue detection (`HF_DetectArenaSfx`) and procedural PCM
+  generation (`HF_GenerateArenaSfxPcm`) for fire/hit/pickup/dodge/boss
+  warning/wave clear/death. The module has no miniaudio/device dependency and
+  is testable in the harness.
+- **Visual juice:** `HfArena` owns presentation-only `fx` state (events,
+  particles, shake, damage flash). FX is emitted at gameplay transitions in
+  `Step()`/`Step(cmd)`, ticks deterministically, does not consume `rng`, and is
+  not serialized; `hfArenaSave::Restore()` resets it. `hfUiDrawPass` renders
+  quad-based muzzle flashes, hit sparks, pickups, dodge/wave pulses, boss
+  telegraphs, particles, screen shake, and damage vignette behind the existing
+  headless/source/arena gate.
+- **Colorblind palettes:** `hfUiTheme` adds `palette_mode` (default/colorblind),
+  serialized/parsed with the theme. `hfUiSettings` persists `colorblind_mode`
+  through the per-account console slot, `hfUiFrontend` exposes a COLORBLIND
+  option toggle, and `hfUiDrawPass` uses the palette for arena overlay colors.
+
+## 9. Non-goals for this project
 
 - Networking/co-op (the replication system exists but is not needed here).
 - Full content pipeline authoring (glTF/BSP import is available but unused).
 - Editor tooling for level layout (phase 6 can consume editor output later).
+- Full dmap compiler, external game DLL packaging, or authored audio assets for
+  the arena prototype.

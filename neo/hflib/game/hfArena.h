@@ -141,6 +141,91 @@ struct HfArena {
 
 	unsigned int	rng;
 
+	// Presentation-only FX state. Never serialized, never consumes rng.
+	enum { MAX_FX_EVENTS = 64, MAX_FX_PARTICLES = 96 };
+	enum HfArenaFxType {
+		FX_MUZZLE = 0, FX_HIT = 1, FX_PICKUP = 2, FX_DODGE = 3,
+		FX_BOSS_WARNING = 4, FX_WAVE = 5, FX_HURT = 6
+	};
+	struct HfArenaFxEvent {
+		int type, kind, magnitude, life, maxLife;
+		float x, y, dx, dy;
+	};
+	struct HfArenaFxParticle {
+		int kind, life, maxLife;
+		float x, y, vx, vy;
+	};
+	struct HfArenaFxState {
+		HfArenaFxEvent events[ MAX_FX_EVENTS ];
+		HfArenaFxParticle particles[ MAX_FX_PARTICLES ];
+		int eventCount;
+		int particleCount;
+		int shakeTicks;
+		int damageFlash;
+		unsigned int emitSeq;
+		void Reset() {
+			eventCount = particleCount = shakeTicks = damageFlash = 0;
+			emitSeq = 0;
+			memset( events, 0, sizeof( events ) );
+			memset( particles, 0, sizeof( particles ) );
+		}
+		void Emit( int type, float x, float y, float dx, float dy, int kind, int magnitude, int life ) {
+			int idx = eventCount < MAX_FX_EVENTS ? eventCount++ : ( int )( emitSeq % MAX_FX_EVENTS );
+			emitSeq++;
+			HfArenaFxEvent &e = events[ idx ];
+			e.type = type; e.kind = kind; e.magnitude = magnitude;
+			e.life = e.maxLife = life > 0 ? life : 1;
+			e.x = x; e.y = y; e.dx = dx; e.dy = dy;
+		}
+		void Burst( float x, float y, int kind, int count, float speed ) {
+			static const float dirs[ 8 ][ 2 ] = {
+				{1,0},{0.7071f,0.7071f},{0,1},{-0.7071f,0.7071f},
+				{-1,0},{-0.7071f,-0.7071f},{0,-1},{0.7071f,-0.7071f}
+			};
+			for ( int i = 0; i < count; i++ ) {
+				int idx = particleCount < MAX_FX_PARTICLES ? particleCount++ : ( int )( emitSeq % MAX_FX_PARTICLES );
+				emitSeq++;
+				HfArenaFxParticle &p = particles[ idx ];
+				const float *d = dirs[ i & 7 ];
+				p.kind = kind; p.life = p.maxLife = 12 + ( i % 5 ) * 2;
+				p.x = x; p.y = y; p.vx = d[ 0 ] * speed; p.vy = d[ 1 ] * speed;
+			}
+		}
+		void Tick() {
+			if ( shakeTicks > 0 ) shakeTicks--;
+			if ( damageFlash > 0 ) damageFlash--;
+			for ( int i = 0; i < eventCount; i++ ) {
+				if ( events[ i ].life > 0 ) events[ i ].life--;
+			}
+			int w = 0;
+			for ( int i = 0; i < particleCount; i++ ) {
+				HfArenaFxParticle &p = particles[ i ];
+				if ( p.life <= 0 ) continue;
+				p.x += p.vx; p.y += p.vy;
+				p.vx *= 0.92f; p.vy *= 0.92f;
+				p.life--;
+				if ( p.life > 0 ) particles[ w++ ] = p;
+			}
+			particleCount = w;
+		}
+		static void ShakeOffset( int ticks, int peak, int total, float &ox, float &oy ) {
+			ox = oy = 0.0f;
+			if ( peak <= 0 || total <= 0 ) return;
+			float t = ( float )peak / ( float )total;
+			unsigned int h = ( unsigned int )ticks * 2654435761u;
+			float sx = ( float )( ( int )( h & 255u ) - 128 ) / 128.0f;
+			float sy = ( float )( ( int )( ( h >> 8 ) & 255u ) - 128 ) / 128.0f;
+			ox = sx * t * 3.0f;
+			oy = sy * t * 3.0f;
+		}
+		static float VignetteAlpha( int damageFlash ) {
+			if ( damageFlash <= 0 ) return 0.0f;
+			float a = ( float )damageFlash / 12.0f;
+			return a > 1.0f ? 1.0f : a;
+		}
+	};
+	HfArenaFxState fx;
+
 	static float	Dist( float ax, float ay, float bx, float by ) {
 		float dx = ax - bx;
 		float dy = ay - by;
@@ -244,6 +329,7 @@ struct HfArena {
 		if ( rng == 0 ) {
 			rng = 1u;
 		}
+		fx.Reset();
 		SpawnWave();
 	}
 
@@ -253,6 +339,8 @@ struct HfArena {
 		pickupCount = 0;
 
 		const bool bossWave = ( wave % BOSS_WAVE ) == 0;
+		fx.Emit( bossWave ? FX_BOSS_WARNING : FX_WAVE, 0.0f, 0.0f, 0.0f, 0.0f, wave, 1, bossWave ? 60 : 30 );
+		if ( bossWave ) { fx.shakeTicks = fx.shakeTicks < 18 ? 18 : fx.shakeTicks; }
 		int count = bossWave ? 5 : 2 + wave;
 		if ( count > MAX_ENEMIES ) {
 			count = MAX_ENEMIES;
@@ -335,6 +423,10 @@ private:
 		hitPoints -= amount;
 		combo = 0;
 		comboTimer = 0;
+		fx.damageFlash = 12;
+		fx.shakeTicks = fx.shakeTicks < 8 ? 8 : fx.shakeTicks;
+		fx.Emit( FX_HURT, playerX, playerY, 0.0f, 0.0f, amount, 1, 12 );
+		fx.Burst( playerX, playerY, FX_HURT, 4, 1.0f );
 	}
 
 	void	DropPickup( int fromKind, float x, float y ) {
@@ -429,6 +521,8 @@ private:
 					score += 50;
 					break;
 			}
+			fx.Emit( FX_PICKUP, p.x, p.y, 0.0f, 0.0f, p.kind, 1, 10 );
+			fx.Burst( p.x, p.y, p.kind, 3, 1.0f );
 			p.life = 0;
 		}
 	}
@@ -480,6 +574,7 @@ public:
 			bullets[ bulletCount ].team = HF_ARENA_BULLET_PLAYER;
 			bulletCount++;
 			fireCooldown = 4;
+			fx.Emit( FX_MUZZLE, playerX, playerY, facingX, facingY, 0, 1, 4 );
 		}
 
 		IntegrateBullets();
@@ -519,6 +614,8 @@ public:
 					bullets[ b ].life = 0;
 					if ( enemies[ e ].hp <= 0 ) {
 						OnEnemyKilled( enemies[ e ].kind, enemies[ e ].x, enemies[ e ].y );
+					} else {
+						fx.Emit( FX_HIT, enemies[ e ].x, enemies[ e ].y, 0.0f, 0.0f, enemies[ e ].kind, 0, 6 );
 					}
 					break;
 				}
@@ -534,16 +631,23 @@ public:
 			hitPoints = 0;
 			gameOver = true;
 			won = false;
+			fx.Emit( FX_HURT, playerX, playerY, 0.0f, 0.0f, 0, 1, 30 );
+			fx.Tick();
 			return;
 		}
 		if ( enemyCount == 0 ) {
 			if ( wave >= TOTAL_WAVES ) {
 				gameOver = true;
 				won = true;
+				fx.Emit( FX_WAVE, 0.0f, 0.0f, 0.0f, 0.0f, wave, 1, 45 );
+				fx.Tick();
 			} else {
 				SpawnWave();
+				fx.Tick();
 			}
+			return;
 		}
+		fx.Tick();
 	}
 
 	// Command-driven gameplay entry point.  This is what a game module, the
@@ -588,6 +692,8 @@ public:
 				mx = facingX;
 				my = facingY;
 			}
+			fx.Emit( FX_DODGE, playerX, playerY, mx, my, 0, 1, 8 );
+			fx.Burst( playerX, playerY, FX_DODGE, 4, 1.2f );
 		}
 		const float speed = dodging || dodgeIFrames > 0 ? DodgeSpeed() : PlayerSpeed();
 		playerX += mx * speed;
@@ -605,6 +711,7 @@ public:
 			bulletCount++;
 			ammo--;
 			fireCooldown = rapidTicks > 0 ? 2 : 4;
+			fx.Emit( FX_MUZZLE, playerX, playerY, facingX, facingY, 0, 1, 4 );
 		}
 
 		IntegrateBullets();
@@ -683,6 +790,8 @@ public:
 					bullets[ b ].life = 0;
 					if ( enemies[ e ].hp <= 0 ) {
 						OnEnemyKilled( enemies[ e ].kind, enemies[ e ].x, enemies[ e ].y );
+					} else {
+						fx.Emit( FX_HIT, enemies[ e ].x, enemies[ e ].y, 0.0f, 0.0f, enemies[ e ].kind, 0, 6 );
 					}
 					break;
 				}
@@ -717,6 +826,8 @@ public:
 					score += 50 * ComboMultiplier();
 					break;
 			}
+			fx.Emit( FX_PICKUP, p.x, p.y, 0.0f, 0.0f, p.kind, 1, 10 );
+			fx.Burst( p.x, p.y, p.kind, 3, 1.0f );
 			p.life = 0;
 		}
 
@@ -728,11 +839,14 @@ public:
 			hitPoints = 0;
 			gameOver = true;
 			won = false;
+			fx.Emit( FX_HURT, playerX, playerY, 0.0f, 0.0f, 0, 1, 30 );
+			fx.Tick();
 			return;
 		}
 		if ( enemyCount == 0 && waveDelay == 0 ) {
 			score += 25 * wave;			// wave-clear bonus
 			waveDelay = WAVE_DELAY;
+			fx.Emit( FX_WAVE, 0.0f, 0.0f, 0.0f, 0.0f, wave, 1, 30 );
 		}
 		if ( waveDelay > 0 ) {
 			waveDelay--;
@@ -740,11 +854,13 @@ public:
 				if ( wave >= TOTAL_WAVES ) {
 					gameOver = true;
 					won = true;
+					fx.Emit( FX_WAVE, 0.0f, 0.0f, 0.0f, 0.0f, wave, 1, 45 );
 				} else {
 					SpawnWave();
 				}
 			}
 		}
+		fx.Tick();
 	}
 };
 

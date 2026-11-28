@@ -387,3 +387,21 @@ engine and exposed as reusable game-facing APIs:
   routing, HUD/results, v1/v2 saves with replay after load, and the shared
   facade/script instance. `ALL PASSED`, plain and `--headless`, default and
   Jolt (4/4 matrix). Both engine binaries rebuilt; no build artifacts committed.
+
+**Follow-up (map/module path, SFX, visual juice):** `ui_startMap` now defaults
+to `maps/arena` and, when no game module is installed, installs a minimal
+built-in `hfArenaStubGame` (`neo/framework/hfArenaStubGame.h`) before buffering
+the map command. A hand-authored minimal `base/maps/arena.proc` (`mapProcFile003`)
+plus `base/maps/arena.map` placeholder provide a real session map-load path
+without requiring a dmap compiler. Pure deterministic gameplay SFX cues live in
+`neo/hflib/audio/hfArenaSfx.h/.cpp` (`HF_DetectArenaSfx`,
+`HF_GenerateArenaSfxPcm`) and are headless-safe. `HfArena` carries
+presentation-only `fx` state (events, particles, shake, damage flash/vignette)
+emitted from gameplay transitions without consuming RNG or changing save schema;
+`hfArenaSave` remains v2 field-wise and resets FX on restore. `hfUiDrawPass`
+renders quad-based muzzle/hit/pickup/dodge/wave/boss-telegraph/particle/shake
+and damage vignette FX, gated by the existing headless/source/arena overlay
+policy. `hfUiTheme` gains `palette_mode` (colorblind-friendly palette) and
+`hfUiSettings`/frontend/menu persist and apply it. Harness tests cover FX
+state/save isolation and pure SFX detection/generation. `ALL PASSED` 4/4
+matrix; both binaries rebuilt.

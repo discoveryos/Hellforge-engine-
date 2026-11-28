@@ -72,6 +72,7 @@ public:
 	float			cornerRadius;
 	float			fontScale;
 	float			focusWidth;
+	int				paletteMode;		// 0=default, 1=colorblind
 
 	hfUiTheme() {
 		SetDefaults();
@@ -100,6 +101,20 @@ public:
 		cornerRadius		= 0.0f;
 		fontScale			= 1.0f;
 		focusWidth			= 2.0f;
+		paletteMode			= 0;
+	}
+
+	void SetPaletteMode( int mode ) {
+		paletteMode = mode;
+		if ( paletteMode == 1 ) {
+			// Colorblind-friendly: avoid red/green reliance, prefer blue/orange/cyan.
+			accent = hfUiThemeColor( 0.90f, 0.70f, 0.10f, 1.0f );
+			buttonHover = hfUiThemeColor( 0.25f, 0.35f, 0.55f, 1.0f );
+			buttonPressed = hfUiThemeColor( 0.10f, 0.20f, 0.35f, 1.0f );
+			toggleCheck = hfUiThemeColor( 0.20f, 0.70f, 0.95f, 1.0f );
+			focus = hfUiThemeColor( 0.90f, 0.70f, 0.10f, 1.0f );
+			sliderHandle = hfUiThemeColor( 0.90f, 0.90f, 0.95f, 1.0f );
+		}
 	}
 
 	// --- text format ------------------------------------------------------
@@ -157,6 +172,7 @@ public:
 		AppendFloat( out, maxSize, "corner_radius", cornerRadius );
 		AppendFloat( out, maxSize, "font_scale", fontScale );
 		AppendFloat( out, maxSize, "focus_width", focusWidth );
+		AppendFloat( out, maxSize, "palette_mode", ( float )paletteMode );
 		return ( int )strlen( out );
 	}
 
@@ -312,6 +328,10 @@ private:
 		}
 		if ( strcmp( key, "focus_width" ) == 0 ) {
 			focusWidth = ( float )atof( value );
+			return true;
+		}
+		if ( strcmp( key, "palette_mode" ) == 0 ) {
+			paletteMode = atoi( value );
 			return true;
 		}
 		return false;

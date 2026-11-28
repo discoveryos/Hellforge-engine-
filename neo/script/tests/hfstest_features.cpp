@@ -38,6 +38,7 @@
 #include "../../hflib/ui/hfUiSettings.h"
 #include "../../hflib/ui/hfUiSaveSlots.h"
 #include "../../hflib/game/hfArenaSave.h"
+#include "../../hflib/audio/hfArenaSfx.h"
 #include "../../renderer/hfUiDrawPass.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -4402,6 +4403,61 @@ static void Test_FrontendIntegration() {
 		FEAT_ASSERT( !bad.Parse( "version = 99\nscore = 1\n" ) );
 	}
 
+	// Arena FX state is presentation-only and must not affect save equality.
+	{
+		HfArena a;
+		a.Reset( 42 );
+		a.fx.Emit( HfArena::FX_MUZZLE, a.playerX, a.playerY, 1.0f, 0.0f, 0, 1, 4 );
+		a.fx.Burst( 0.0f, 0.0f, HfArena::FX_HIT, 4, 1.0f );
+		a.fx.shakeTicks = 8;
+		a.fx.damageFlash = 6;
+		a.fx.Tick();
+		FEAT_ASSERT( a.fx.shakeTicks == 7 );
+		FEAT_ASSERT( a.fx.damageFlash == 5 );
+		FEAT_ASSERT( a.fx.eventCount > 0 );
+
+		HfArena b = a;
+		b.fx.Reset();
+		hfArenaSave sa, sb;
+		sa.Capture( a );
+		sb.Capture( b );
+		FEAT_ASSERT( sa.Equals( sb ) );
+
+		HfArena restored;
+		restored.Reset( 7 );
+		restored.fx.Emit( HfArena::FX_HIT, 1.0f, 2.0f, 0, 0, 0, 1, 10 );
+		FEAT_ASSERT( sa.Restore( restored ) );
+		FEAT_ASSERT( restored.fx.eventCount == 0 );
+		FEAT_ASSERT( restored.fx.shakeTicks == 0 );
+
+		float ox, oy;
+		HfArena::HfArenaFxState::ShakeOffset( 4, 4, 8, ox, oy );
+		FEAT_ASSERT( ox != 0.0f || oy != 0.0f );
+		FEAT_NEAR( HfArena::HfArenaFxState::VignetteAlpha( 0 ), 0.0f, 1e-5f );
+		FEAT_ASSERT( HfArena::HfArenaFxState::VignetteAlpha( 12 ) > 0.9f );
+	}
+
+	// Pure SFX cue detection/generation is deterministic and headless-safe.
+	{
+		using namespace HF_Audio;
+		HfArena prev, curr;
+		prev.Reset( 1 );
+		curr = prev;
+		HfArenaInput cmd;
+		cmd.Clear();
+		cmd.fire = true;
+		curr.Step( cmd );
+		hfArenaSfxEvents ev = HF_DetectArenaSfx( prev, curr, cmd, true );
+		FEAT_ASSERT( ev.Has( HF_ARENA_SFX_FIRE ) );
+
+		float pcm[ 8192 ];
+		hfAudioSampleInfo info;
+		FEAT_ASSERT( HF_GenerateArenaSfxPcm( HF_ARENA_SFX_HIT, pcm, 8192, info, 48000 ) );
+		FEAT_ASSERT( info.channels == 1 );
+		FEAT_ASSERT( info.sampleRate == 48000 );
+		FEAT_ASSERT( info.totalFrames > 0 );
+	}
+
 	// (c) theme font scale, focus styling and nine-patch panel data
 	{
 		hfUiTheme theme;
@@ -4411,11 +4467,13 @@ static void Test_FrontendIntegration() {
 			"focus = 0,1,0,1\n"
 			"focus_width = 4\n"
 			"corner_radius = 9\n"
-			"panel_border_width = 3\n" ) );
+			"panel_border_width = 3\n"
+			"palette_mode = 1\n" ) );
 		FEAT_NEAR( theme.fontScale, 1.5f, 1e-5f );
 		FEAT_NEAR( theme.focusWidth, 4.0f, 1e-5f );
 		FEAT_NEAR( theme.focus.g, 1.0f, 1e-5f );
 		FEAT_NEAR( theme.cornerRadius, 9.0f, 1e-5f );
+		FEAT_ASSERT( theme.paletteMode == 1 );
 
 		char text[ 4096 ];
 		FEAT_ASSERT( theme.Serialize( text, sizeof( text ) ) > 0 );
@@ -4425,6 +4483,7 @@ static void Test_FrontendIntegration() {
 		FEAT_NEAR( copy.fontScale, 1.5f, 1e-5f );
 		FEAT_NEAR( copy.focusWidth, 4.0f, 1e-5f );
 		FEAT_NEAR( copy.focus.g, 1.0f, 1e-5f );
+		FEAT_ASSERT( copy.paletteMode == 1 );
 
 		HF_Ecs::Registry reg;
 		hfUiSystem ui;

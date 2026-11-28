@@ -2213,11 +2213,19 @@ gate in `guide/08-tests.md`, and render gotchas in `guide/10-gotchas.md`.
 
 ## 28. Twin-stick arena gameplay overlay
 
-The quad overlay now reflects the full simulation without adding textures or a
-scene path. Chasers are red, spitters cyan, brutes violet and the boss pink;
-ammo, health and score pickups are yellow, green and magenta; enemy bullets are
-pink while player bullets stay pale yellow. A short facing pip and a
+The quad overlay reflects the full simulation without adding textures or a
+scene path. Chasers/spitters/brutes/bosses and pickups/bullets use distinct
+palette colors, with a colorblind-friendly palette selectable through
+`hfUiTheme::palette_mode` / `hfUiSettings::colorblind_mode` / frontend options
+and mirrored to `hfUiDrawPass::SetColorblindMode()`. A short facing pip and a
 translucent shell during dodge i-frames make aim and evasion readable.
+
+Presentation-only FX state in `HfArena::fx` emits deterministic, RNG-free
+events/particles for muzzle flashes, hit sparks, pickups, dodge, boss
+telegraphs, wave pulses, screen shake, and damage vignette. The draw pass
+renders them as quads and applies shake/vignette helpers; FX is reset on arena
+reset/save restore and is not part of save schema. Pure SFX cue
+detection/generation lives in `hflib/audio/hfArenaSfx.h/.cpp`.
 
 The frontend supplies a plain `HfArenaInput` to `HfArena::Step(cmd)`; the draw
 pass only reads arena state through the existing `(source, arena, enabled)`
@@ -2226,7 +2234,8 @@ same state through `HfArenaGame` or the scalar `arena_*` hfscript hosts.
 
 ### Verification
 
-`Test_TwinStickArena()` pins the headless-testable parts: command routing, HUD
-and RESULTS text, v1/v2 save compatibility and replay determinism. `ALL
-PASSED`, plain and `--headless`, default and Jolt (4/4 matrix). Runtime colour
-composition still needs a GPU/display and is not asserted here.
+`Test_TwinStickArena()` and feature tests pin command routing, HUD/results,
+v1/v2 save compatibility, FX/save isolation, colorblind theme parsing, and pure
+SFX cue detection/generation. `ALL PASSED`, plain and `--headless`, default and
+Jolt (4/4 matrix). Runtime GL composition still needs a GPU/display and is not
+asserted here.

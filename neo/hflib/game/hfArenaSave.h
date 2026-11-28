@@ -172,6 +172,7 @@ struct hfArenaSave {
 		memcpy( arena.bullets, bullets, sizeof( bullets ) );
 		memcpy( arena.pickups, pickups, sizeof( pickups ) );
 		arena.rng = rng;
+		arena.fx.Reset();
 		return true;
 	}
 

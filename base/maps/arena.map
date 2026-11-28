@@ -1,0 +1,10 @@
+// Hellforge Arena - minimal prototype map placeholder.
+// The runtime loads the compiled .proc; this .map documents the shipped map
+// name for the ui_startMap/session path. A full dmap compiler is not required
+// for this arena prototype.
+Version 2
+// entity 0
+{
+"classname" "worldspawn"
+"name" "arena"
+}

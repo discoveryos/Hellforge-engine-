@@ -41,6 +41,8 @@ public:
 	// without a GL context.
 	static void	SetGameplayOverlay( HfArena *arena ) { s_arena = arena; }
 	static void	SetGameplayOverlayEnabled( bool enabled ) { s_gameplayOverlayEnabled = enabled; }
+	static void	SetColorblindMode( bool enabled ) { s_colorblindMode = enabled; }
+	static bool	GetColorblindMode() { return s_colorblindMode; }
 	static bool	ShouldDrawGameplayOverlay();
 	// Pure form of the ownership policy so the headless harness can pin it
 	// without linking the renderer translation unit.
@@ -57,6 +59,7 @@ private:
 	static HF_Ui::hfUiSystem *		s_system;
 	static HfArena *				s_arena;
 	static bool						s_gameplayOverlayEnabled;
+	static bool						s_colorblindMode;
 };
 
 #endif
