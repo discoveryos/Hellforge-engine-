@@ -56,6 +56,7 @@ struct hfUiSettings {
 	bool	fullscreen;
 	bool	vsync;
 	bool	colorblindMode;
+	bool	fpsBoost;
 
 	hfUiSettings() { SetDefaults(); }
 
@@ -69,6 +70,7 @@ struct hfUiSettings {
 		fullscreen = false;
 		vsync = true;
 		colorblindMode = false;
+		fpsBoost = false;
 	}
 
 	int Serialize( char *out, int maxSize ) const {
@@ -82,9 +84,10 @@ struct hfUiSettings {
 				  "quality = %d\n"
 				  "fullscreen = %d\n"
 				  "vsync = %d\n"
-				  "colorblind_mode = %d\n",
+				  "colorblind_mode = %d\n"
+				  "fps_boost = %d\n",
 				  musicVolume, sfxVolume, mouseSensitivity, width, height, quality,
-				  fullscreen ? 1 : 0, vsync ? 1 : 0, colorblindMode ? 1 : 0 );
+				  fullscreen ? 1 : 0, vsync ? 1 : 0, colorblindMode ? 1 : 0, fpsBoost ? 1 : 0 );
 		return ( int )strlen( out );
 	}
 
@@ -147,6 +150,7 @@ struct hfUiSettings {
 		frontend.SetSfxVolume( sfxVolume );
 		frontend.SetFullscreen( fullscreen );
 		frontend.SetColorblindMode( colorblindMode );
+		frontend.SetFpsBoost( fpsBoost );
 	}
 
 	void ReadFrom( const hfUiFrontend &frontend ) {
@@ -154,6 +158,7 @@ struct hfUiSettings {
 		sfxVolume = frontend.GetSfxVolume();
 		fullscreen = frontend.GetFullscreen();
 		colorblindMode = frontend.GetColorblindMode();
+		fpsBoost = frontend.GetFpsBoost();
 		Clamp();
 	}
 
@@ -197,6 +202,7 @@ struct hfUiSettings {
 		cvars->SetCVarInteger( "r_vidMode", v.vidMode );
 		cvars->SetCVarInteger( "opt_applyPreset", v.quality );
 		cvars->SetCVarInteger( "r_swapInterval", v.swapInterval );
+		cvars->SetCVarInteger( "opt_fpsBoost", fpsBoost ? 1 : 0 );
 		return true;
 	}
 

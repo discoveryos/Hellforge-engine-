@@ -84,6 +84,8 @@ frame from `RB_ExecuteBackEndCommands` with the GPU timer query.
 | `opt_stepUpFrames` | 8 | below-budget frames before stepping quality up |
 | `opt_minQuality` / `opt_maxQuality` | 0 / 9 | allowed quality window |
 | `opt_applyPreset` | -1 | `-1` = adaptive, `0..9` = lock a quality level |
+| `opt_fpsBoost` | 0 | aggressive low-end boost: forces min quality + dynamic res + reduced effects |
+| `opt_autoLowMemory` | 1 | detect low RAM via `/proc/meminfo` and apply memory-light hints |
 | `opt_show` | 0 | 1 = per-change prints, 2 = per-frame stats line |
 | `opt_warmup` | 1 | pre-compile all uber + compute shaders at init |
 | `opt_level` | 4 (ROM) | read-only current quality level (console overlay) |

@@ -119,11 +119,13 @@ public:
 		m_sfxSlider = HF_Ecs::ENTITY_NULL;
 		m_fullscreenToggle = HF_Ecs::ENTITY_NULL;
 		m_colorblindToggle = HF_Ecs::ENTITY_NULL;
+		m_fpsBoostToggle = HF_Ecs::ENTITY_NULL;
 		for ( int i = 0; i < HF_UI_HUD_COUNT; i++ ) { m_hud[ i ] = HF_Ecs::ENTITY_NULL; }
 		m_musicVolume = 70.0f;
 		m_sfxVolume = 85.0f;
 		m_fullscreen = false;
 		m_colorblindMode = false;
+		m_fpsBoost = false;
 		m_lastSaveSlot = -1;
 		m_lastSaveKind = -1;
 		m_pendingBindRow = -1;
@@ -225,6 +227,7 @@ public:
 	float	GetSfxVolume() const { return m_sfxVolume; }
 	bool	GetFullscreen() const { return m_fullscreen; }
 	bool	GetColorblindMode() const { return m_colorblindMode; }
+	bool	GetFpsBoost() const { return m_fpsBoost; }
 
 	void SetMusicVolume( float v ) {
 		m_musicVolume = v;
@@ -244,6 +247,10 @@ public:
 		if ( m_colorblindMode ) { m_theme.SetPaletteMode( 1 ); }
 		if ( m_state == HF_UI_FRONTEND_MENU ) { SetState( HF_UI_FRONTEND_MENU ); }
 		else { m_theme.Apply( m_registry ); }
+	}
+	void SetFpsBoost( bool on ) {
+		m_fpsBoost = on;
+		if ( m_state == HF_UI_FRONTEND_MENU ) { SetState( HF_UI_FRONTEND_MENU ); }
 	}
 
 	// --- theme ------------------------------------------------------------
@@ -601,6 +608,8 @@ private:
 				m_theme.SetDefaults();
 				if ( m_colorblindMode ) { m_theme.SetPaletteMode( 1 ); }
 				m_theme.Apply( m_registry );
+			} else if ( ev->entity == m_fpsBoostToggle ) {
+				m_fpsBoost = ev->valueI != 0;
 			}
 		}
 	}
@@ -951,13 +960,17 @@ private:
 		m_colorblindToggle = hfUiBuilder::CreateToggle( m_registry, root, controlX, 300.0f,
 														 controlW, 28.0f, "ENABLED", m_colorblindMode );
 
-		AddLabel( root, 0.0f, 344.0f, m_width, 24.0f, "KEY BINDINGS", 1.25f,
+		AddLabel( root, labelX, 346.0f, 160.0f, 28.0f, "FPS BOOST", 1.5f, HF_UI_TEXT_LEFT );
+		m_fpsBoostToggle = hfUiBuilder::CreateToggle( m_registry, root, controlX, 344.0f,
+													  controlW, 28.0f, "ENABLED", m_fpsBoost );
+
+		AddLabel( root, 0.0f, 388.0f, m_width, 24.0f, "KEY BINDINGS", 1.25f,
 				  HF_UI_TEXT_CENTER, 0.95f, 0.55f, 0.15f );
 
 		m_keybindRowCount = 0;
 		const int rows = m_keybinds.Count() < 5 ? m_keybinds.Count() : 5;
 		for ( int i = 0; i < rows; i++ ) {
-			const float y = 338.0f + ( float )i * 31.0f;
+			const float y = 416.0f + ( float )i * 31.0f;
 			const char *action = m_keybinds.ActionAt( i );
 			AddLabel( root, labelX, y, 160.0f, 24.0f, action != NULL ? action : "?", 1.0f, HF_UI_TEXT_LEFT );
 			char buf[ 64 ];
@@ -969,11 +982,11 @@ private:
 			m_keybindRowCount++;
 		}
 
-		m_keybindStatus = AddLabel( root, 0.0f, 510.0f, m_width, 24.0f,
+		m_keybindStatus = AddLabel( root, 0.0f, 584.0f, m_width, 24.0f,
 									"CLICK A BINDING, THEN PRESS A KEY", 1.0f,
 									HF_UI_TEXT_CENTER, 0.55f, 0.58f, 0.65f );
 
-		AddButton( root, ( m_width - 300.0f ) * 0.5f, 560.0f, 300.0f, 46.0f, "BACK", HF_UI_ACTION_BACK );
+		AddButton( root, ( m_width - 300.0f ) * 0.5f, 620.0f, 300.0f, 46.0f, "BACK", HF_UI_ACTION_BACK );
 	}
 
 	void BuildLoading() {
@@ -1130,6 +1143,7 @@ private:
 	float				m_sfxVolume;
 	bool				m_fullscreen;
 	bool				m_colorblindMode;
+	bool				m_fpsBoost;
 
 	hfUiTheme			m_theme;
 
@@ -1139,6 +1153,7 @@ private:
 	HF_Ecs::Entity		m_sfxSlider;
 	HF_Ecs::Entity		m_fullscreenToggle;
 	HF_Ecs::Entity		m_colorblindToggle;
+	HF_Ecs::Entity		m_fpsBoostToggle;
 	HF_Ecs::Entity		m_resultLabel;
 	HF_Ecs::Entity		m_resultSummary;
 	hfUiSaveSlots		m_saveSlots;

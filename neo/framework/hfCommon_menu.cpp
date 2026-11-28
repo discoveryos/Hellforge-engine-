@@ -21,6 +21,7 @@ static float				s_frontendMusic = -1.0f;
 static float				s_frontendSfx = -1.0f;
 static bool					s_frontendFullscreen = false;
 static bool					s_frontendColorblind = false;
+static bool					s_frontendFpsBoost = false;
 
 /*
 ==============
@@ -216,6 +217,7 @@ void hfCommonLocal::InitFrontend() {
 	s_frontendSfx = s_frontendSettings.sfxVolume;
 	s_frontendFullscreen = s_frontendSettings.fullscreen;
 	s_frontendColorblind = s_frontendSettings.colorblindMode;
+	s_frontendFpsBoost = s_frontendSettings.fpsBoost;
 	hfUiDrawPass::SetColorblindMode( s_frontendColorblind );
 }
 
@@ -270,11 +272,14 @@ void hfCommonLocal::FrontendFrame() {
 		const float sfx = uiFrontend->GetSfxVolume();
 		const bool fullscreen = uiFrontend->GetFullscreen();
 		const bool colorblind = uiFrontend->GetColorblindMode();
-		if ( music != s_frontendMusic || sfx != s_frontendSfx || fullscreen != s_frontendFullscreen || colorblind != s_frontendColorblind ) {
+		const bool fpsBoost = uiFrontend->GetFpsBoost();
+		if ( music != s_frontendMusic || sfx != s_frontendSfx || fullscreen != s_frontendFullscreen
+			|| colorblind != s_frontendColorblind || fpsBoost != s_frontendFpsBoost ) {
 			s_frontendMusic = music;
 			s_frontendSfx = sfx;
 			s_frontendFullscreen = fullscreen;
 			s_frontendColorblind = colorblind;
+			s_frontendFpsBoost = fpsBoost;
 			s_frontendSettings.ReadFrom( *uiFrontend );
 			s_frontendSettings.ApplyToCVars();
 			hfUiDrawPass::SetColorblindMode( s_frontendColorblind );

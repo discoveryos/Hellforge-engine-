@@ -26,6 +26,8 @@ hfCVar opt_maxQuality(    "opt_maxQuality",    "9", CVAR_RENDERER | CVAR_INTEGER
 hfCVar opt_show(          "opt_show",          "0", CVAR_RENDERER | CVAR_INTEGER, "Optimizer overlay (0 = off, 1 = per-frame print, 2 = stats line)" );
 hfCVar opt_warmup(        "opt_warmup",        "1", CVAR_RENDERER | CVAR_BOOL,  "Pre-compile all uber shaders at init to eliminate hitches" );
 hfCVar opt_applyPreset(   "opt_applyPreset",   "-1", CVAR_RENDERER | CVAR_INTEGER, "Apply a fixed quality level (-1 = use adaptive, 0..9 = locked)" );
+hfCVar opt_fpsBoost(      "opt_fpsBoost",      "0", CVAR_RENDERER | CVAR_BOOL, "Aggressive low-end FPS boost (forces low quality, dynamic res, reduced effects)" );
+hfCVar opt_autoLowMemory( "opt_autoLowMemory", "1", CVAR_RENDERER | CVAR_BOOL, "Auto-detect low RAM and prefer memory-light settings" );
 // Read-only status cvar: updated every frame by the optimizer so the console
 // overlay can draw the current quality level without a header dependency.
 hfCVar opt_level(         "opt_level",         "4", CVAR_RENDERER | CVAR_INTEGER | CVAR_ROM, "Current optimizer quality level (read-only)" );
@@ -40,6 +42,34 @@ hfFpsOptimizer::hfFpsOptimizer() {
 	lastGpuMs           = 0.0f;
 	framesBelowBudget   = 0;
 	lastAppliedLevel    = -1;
+}
+
+static int HF_DetectSystemMemoryMB() {
+	FILE *f = fopen( "/proc/meminfo", "r" );
+	if ( f == NULL ) { return 0; }
+	char key[ 64 ];
+	long value = 0;
+	char unit[ 32 ];
+	long memTotalKB = 0;
+	long memAvailableKB = 0;
+	while ( fscanf( f, "%63s %ld %31s", key, &value, unit ) == 3 ) {
+		if ( strcmp( key, "MemTotal:" ) == 0 ) { memTotalKB = value; }
+		else if ( strcmp( key, "MemAvailable:" ) == 0 ) { memAvailableKB = value; }
+	}
+	fclose( f );
+	if ( memAvailableKB <= 0 ) { memAvailableKB = memTotalKB; }
+	return ( int )( memAvailableKB / 1024L );
+}
+
+static void HF_ApplyLowMemoryHints( int memMB ) {
+	// Low-RAM devices rely on OS swap; reduce engine memory pressure where possible.
+	if ( memMB > 0 && memMB < 2048 ) {
+		hfCVar *img = cvarSystem->Find( "com_imageMB" );
+		if ( img != NULL && img->GetInteger() > 64 ) { img->SetInteger( 64 ); }
+		hfCVar *sound = cvarSystem->Find( "s_maxSounds" );
+		if ( sound != NULL && sound->GetInteger() > 16 ) { sound->SetInteger( 16 ); }
+		hfLib::Printf( "hfFpsOptimizer: low memory detected (%d MB available), applying memory-light hints (OS swap may be used)\n", memMB );
+	}
 }
 
 /*
@@ -57,12 +87,31 @@ void hfFpsOptimizer::ApplyCapabilityDefaults() {
 	currentQualityLevel = HF_Opt::QualityLevelForCaps( glMajor, glMinor, compute, ubo );
 	minQualityLevel = HF_Opt::ClampQuality( opt_minQuality.GetInteger(), 0, HF_Opt::QUALITY_LEVELS - 1 );
 	maxQualityLevel = HF_Opt::ClampQuality( opt_maxQuality.GetInteger(), 0, HF_Opt::QUALITY_LEVELS - 1 );
-	currentQualityLevel = HF_Opt::ClampQuality( currentQualityLevel, minQualityLevel, maxQualityLevel );
 
+	const int memMB = HF_DetectSystemMemoryMB();
+	if ( opt_autoLowMemory.GetBool() ) {
+		HF_ApplyLowMemoryHints( memMB );
+		if ( memMB > 0 && memMB < 4096 && currentQualityLevel > 2 ) {
+			currentQualityLevel = 2;
+		}
+	}
+	if ( opt_fpsBoost.GetBool() ) {
+		currentQualityLevel = minQualityLevel;
+	}
+
+	currentQualityLevel = HF_Opt::ClampQuality( currentQualityLevel, minQualityLevel, maxQualityLevel );
 	ApplyQualityLevel( currentQualityLevel );
 
-	hfLib::Printf( "hfFpsOptimizer: GL %d.%d caps -> quality level %d (%s)\n",
-		glMajor, glMinor, currentQualityLevel, HF_Opt::QualityLabel( currentQualityLevel ) );
+	if ( opt_fpsBoost.GetBool() ) {
+		hfCVar *rsEnable = cvarSystem->Find( "rs_enable" );
+		hfCVar *rsMin = cvarSystem->Find( "rs_minScale" );
+		if ( rsEnable ) { rsEnable->SetInteger( 3 ); }
+		if ( rsMin ) { rsMin->SetFloat( 0.5f ); }
+	}
+
+	hfLib::Printf( "hfFpsOptimizer: GL %d.%d caps -> quality level %d (%s)%s\n",
+		glMajor, glMinor, currentQualityLevel, HF_Opt::QualityLabel( currentQualityLevel ),
+		opt_fpsBoost.GetBool() ? " [fpsBoost]" : "" );
 }
 
 /*
@@ -194,6 +243,21 @@ void hfFpsOptimizer::FrameSample( int gpuMicroSec ) {
 	lastGpuMs = gpuMicroSec * 0.001f;
 	float budgetMs = HF_Opt::TargetFrameMs( opt_targetFps.GetInteger() );
 	float agg = HF_Opt::ClampQuality( ( int ) ( opt_aggression.GetFloat() * 10.0f ), 0, 10 ) / 10.0f;
+
+	// FPS boost: aggressive low-end mode for trash devices.
+	if ( opt_fpsBoost.GetBool() ) {
+		int boostLevel = HF_Opt::ClampQuality( minQualityLevel, 0, HF_Opt::QUALITY_LEVELS - 1 );
+		if ( boostLevel != currentQualityLevel ) {
+			resolutionScale.ResetToFullResolution();
+			ApplyQualityLevel( boostLevel );
+		}
+		hfCVar *rsEnable = cvarSystem->Find( "rs_enable" );
+		hfCVar *rsMin = cvarSystem->Find( "rs_minScale" );
+		if ( rsEnable ) { rsEnable->SetInteger( 3 ); }
+		if ( rsMin ) { rsMin->SetFloat( 0.5f ); }
+		AdjustDynamicResolution( gpuMicroSec );
+		return;
+	}
 
 	// Fixed-preset override: when opt_applyPreset >= 0, lock to that level
 	// and skip adaptive logic.

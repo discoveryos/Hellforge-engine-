@@ -405,3 +405,11 @@ policy. `hfUiTheme` gains `palette_mode` (colorblind-friendly palette) and
 `hfUiSettings`/frontend/menu persist and apply it. Harness tests cover FX
 state/save isolation and pure SFX detection/generation. `ALL PASSED` 4/4
 matrix; both binaries rebuilt.
+
+**FPS optimization / low-end boost:** `hfFpsOptimizer` adds `opt_fpsBoost`
+(aggressive low-end mode forcing min quality, dynamic resolution, reduced
+effects) and `opt_autoLowMemory` (detects available RAM from `/proc/meminfo`,
+applies memory-light hints such as lower image/sound budgets; on low RAM the OS
+may use swap - the engine reduces its own footprint rather than managing swap).
+`hfUiSettings` persists `fps_boost` and applies `opt_fpsBoost`; frontend options
+expose an FPS BOOST toggle.
